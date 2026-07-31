@@ -388,26 +388,83 @@ func Slugs() []string {
 // An entry is safe to drop once a production import has run and cleared the tag.
 var RetiredSlugs = []string{"russian-roots"}
 
-// Match maps each candidate (a company name or slug) to a canonical company slug
-// via normalize.Slug and splits the candidates into those whose slug is present in
-// `existing` and those whose original value is not. Matched slugs are deduplicated
-// and sorted; unmatched values are returned verbatim (for logging) in input order.
-// A candidate that normalizes to an empty slug is treated as unmatched.
-func Match(candidates []string, existing map[string]struct{}) (matched, unmatched []string) {
-	seen := make(map[string]struct{}, len(candidates))
-	for _, c := range candidates {
-		slug := normalize.Slug(c)
-		if _, ok := existing[slug]; slug != "" && ok {
-			if _, dup := seen[slug]; !dup {
-				seen[slug] = struct{}{}
-				matched = append(matched, slug)
-			}
+// MaxLoggedUnmatched bounds the unmatched entries a hand list reports by name, so a
+// mis-edited list cannot flood a run's output.
+const MaxLoggedUnmatched = 50
+
+// MatchStat is how one collection's candidates fell out: how many companies earned
+// the tag, how many candidates matched no company at all, how many matched a company
+// but failed the gate, and how many register rows the ambiguity guard dropped.
+// Gated and Ambiguous are zero for a gateless editorial collection — they are what a
+// dry run is read for.
+type MatchStat struct {
+	Matched, Unmatched int
+	Gated, Ambiguous   int
+	UnmatchedNames     []string
+}
+
+// Members resolves this collection's candidate records to the company slugs that
+// earn its tag, and reports how the candidates fell out. Matched slugs are
+// deduplicated and sorted; unmatched names are returned verbatim, in input order,
+// for logging.
+//
+// Two things differ by kind. An editorial collection matches on normalize.Slug —
+// unchanged, because every existing collection reconciles through this path and a
+// changed match rule would silently rewrite its membership. A credential matches on
+// RegisterSlug, which strips the legal form a public register appends to a name, and
+// first drops rows whose name identifies more than one organisation.
+//
+// A company is tagged when ANY of its records passes the gate: a register lists an
+// organisation once per route it holds, so a work-route row must win even when a
+// temporary-route row for the same body is listed first.
+func (c Collection) Members(records []Record, companies map[string]Company) ([]string, MatchStat) {
+	var stat MatchStat
+	slugOf := normalize.Slug
+	if c.Kind == KindCredential {
+		before := len(records)
+		records = DropAmbiguous(records, c.identityKey())
+		stat.Ambiguous = before - len(records)
+		slugOf = RegisterSlug
+	}
+
+	admitted := make(map[string]struct{}, len(records))
+	gatedOut := make(map[string]struct{}, len(records))
+	for _, r := range records {
+		slug := slugOf(r.Name)
+		company, known := companies[slug]
+		if slug == "" || !known {
+			stat.Unmatched++
+			stat.UnmatchedNames = append(stat.UnmatchedNames, r.Name)
 			continue
 		}
-		unmatched = append(unmatched, c)
+		if !c.Admits(company, r) {
+			gatedOut[slug] = struct{}{}
+			continue
+		}
+		admitted[slug] = struct{}{}
+	}
+
+	matched := make([]string, 0, len(admitted))
+	for slug := range admitted {
+		matched = append(matched, slug)
 	}
 	sort.Strings(matched)
-	return matched, unmatched
+	stat.Matched = len(matched)
+	for slug := range gatedOut {
+		// A company with both an admitted and a rejected row is not gated out.
+		if _, ok := admitted[slug]; !ok {
+			stat.Gated++
+		}
+	}
+	return matched, stat
+}
+
+// identityKey is this collection's dataset organisation discriminator, if any.
+func (c Collection) identityKey() string {
+	if c.Dataset == nil {
+		return ""
+	}
+	return c.Dataset.IdentityKey
 }
 
 // Reconcile computes a company's new collection set: it removes every tag in

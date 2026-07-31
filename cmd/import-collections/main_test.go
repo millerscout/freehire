@@ -1,9 +1,16 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/strelov1/freehire/internal/collections"
 	"github.com/strelov1/freehire/internal/db"
@@ -46,11 +53,11 @@ func TestPlan(t *testing.T) {
 		t.Errorf("nytimes should not be rewritten (no managed match), got %v", writeBySlug["nytimes"])
 	}
 
-	if s := got.stats["yc"]; s.matched != 1 || s.unmatched != 1 {
+	if s := got.stats["yc"]; s.Matched != 1 || s.Unmatched != 1 {
 		t.Errorf("yc stats = %+v, want {matched:1 unmatched:1}", s)
 	}
-	if s := got.stats["bigtech"]; s.matched != 1 { // only google (of the rows) is in the hand list
-		t.Errorf("bigtech matched = %d, want 1", s.matched)
+	if s := got.stats["bigtech"]; s.Matched != 1 { // only google (of the rows) is in the hand list
+		t.Errorf("bigtech matched = %d, want 1", s.Matched)
 	}
 }
 
@@ -69,5 +76,192 @@ func TestPlan_PreservesUnmanagedTag(t *testing.T) {
 	sort.Strings(c)
 	if !reflect.DeepEqual(c, []string{"bigtech", "custom"}) {
 		t.Errorf("collections = %#v, want [bigtech custom]", c)
+	}
+}
+
+// credentialRows is a catalogue shaped for the gate tests: a UK-headquartered
+// single-token company, a multinational that merely hires in the UK, and a
+// two-token British company.
+func credentialRows() []db.ListCompanyCollectionsRow {
+	return []db.ListCompanyCollectionsRow{
+		{Slug: "monzo", Countries: []string{"GB"}, HqCountry: pgtype.Text{String: "GB", Valid: true}},
+		{Slug: "apple", Countries: []string{"GB", "US"}, HqCountry: pgtype.Text{String: "US", Valid: true}},
+		{Slug: "acme-robotics", Countries: []string{"GB"}},
+	}
+}
+
+func tagsFor(p planResult, slug string) []string {
+	for _, w := range p.writes {
+		if w.Slug == slug {
+			return w.Collections
+		}
+	}
+	return nil
+}
+
+func TestPlan_CredentialMatchesThroughTheLegalSuffix(t *testing.T) {
+	// "ACME ROBOTICS LIMITED" must reach acme-robotics, which plain normalize.Slug
+	// would never do.
+	resolved := map[string][]collections.Record{
+		"uk-skilled-worker-sponsor": {
+			{Name: "ACME ROBOTICS LIMITED", Meta: map[string]string{"town": "London", "route": "Skilled Worker"}},
+		},
+	}
+	got := plan(credentialRows(), resolved)
+	if c := tagsFor(got, "acme-robotics"); !slices.Contains(c, "uk-skilled-worker-sponsor") {
+		t.Errorf("acme-robotics tags = %v, want the UK credential", c)
+	}
+}
+
+func TestPlan_CredentialAppliesTheSingleTokenHeadquartersRule(t *testing.T) {
+	resolved := map[string][]collections.Record{
+		"uk-skilled-worker-sponsor": {
+			{Name: "MONZO LTD", Meta: map[string]string{"town": "London", "route": "Skilled Worker"}},
+			{Name: "APPLE LTD", Meta: map[string]string{"town": "Liverpool", "route": "Skilled Worker"}},
+		},
+	}
+	got := plan(credentialRows(), resolved)
+	if c := tagsFor(got, "monzo"); !slices.Contains(c, "uk-skilled-worker-sponsor") {
+		t.Errorf("monzo tags = %v, want the UK credential", c)
+	}
+	if c := tagsFor(got, "apple"); slices.Contains(c, "uk-skilled-worker-sponsor") {
+		t.Errorf("apple earned a credential from an unrelated APPLE LTD: %v", c)
+	}
+}
+
+func TestPlan_CredentialNeedsAWorkRoute(t *testing.T) {
+	resolved := map[string][]collections.Record{
+		"uk-skilled-worker-sponsor": {
+			{Name: "ACME ROBOTICS LTD", Meta: map[string]string{"town": "London", "route": "Temporary Worker - Seasonal Worker"}},
+		},
+	}
+	got := plan(credentialRows(), resolved)
+	if c := tagsFor(got, "acme-robotics"); slices.Contains(c, "uk-skilled-worker-sponsor") {
+		t.Errorf("a seasonal-worker licence earned the skilled-worker credential: %v", c)
+	}
+}
+
+func TestPlan_CredentialTakesTheWorkRouteAmongSeveral(t *testing.T) {
+	// One organisation, several routes: the work route must win even when a
+	// temporary one is listed first.
+	resolved := map[string][]collections.Record{
+		"uk-skilled-worker-sponsor": {
+			{Name: "ACME ROBOTICS LTD", Meta: map[string]string{"town": "London", "route": "Temporary Worker - Creative Worker"}},
+			{Name: "ACME ROBOTICS LTD", Meta: map[string]string{"town": "London", "route": "Skilled Worker"}},
+		},
+	}
+	got := plan(credentialRows(), resolved)
+	if c := tagsFor(got, "acme-robotics"); !slices.Contains(c, "uk-skilled-worker-sponsor") {
+		t.Errorf("acme-robotics tags = %v, want the UK credential", c)
+	}
+}
+
+func TestPlan_CredentialDropsAnAmbiguousName(t *testing.T) {
+	// Two organisations in different towns share a normalized name: it identifies
+	// neither, so nobody is tagged.
+	resolved := map[string][]collections.Record{
+		"uk-skilled-worker-sponsor": {
+			{Name: "ACME ROBOTICS LTD", Meta: map[string]string{"town": "London", "route": "Skilled Worker"}},
+			{Name: "Acme Robotics Limited", Meta: map[string]string{"town": "Leeds", "route": "Skilled Worker"}},
+		},
+	}
+	got := plan(credentialRows(), resolved)
+	if c := tagsFor(got, "acme-robotics"); slices.Contains(c, "uk-skilled-worker-sponsor") {
+		t.Errorf("an ambiguous register name was granted: %v", c)
+	}
+	if s := got.stats["uk-skilled-worker-sponsor"]; s.Ambiguous == 0 {
+		t.Error("the ambiguity guard did not report what it dropped")
+	}
+}
+
+func TestPlan_EditorialMatchingIsUnchangedByTheSuffixStrip(t *testing.T) {
+	// Editorial collections keep matching on normalize.Slug. A dataset name carrying
+	// a legal form must NOT be stripped into a different company's slug.
+	rows := []db.ListCompanyCollectionsRow{{Slug: "acme-robotics-limited"}}
+	got := plan(rows, map[string][]collections.Record{"yc": slugRecords([]string{"Acme Robotics Limited"})})
+	if c := tagsFor(got, "acme-robotics-limited"); !slices.Contains(c, "yc") {
+		t.Errorf("editorial match changed shape: %v", c)
+	}
+}
+
+func TestPlan_CountsGatedOutCandidates(t *testing.T) {
+	resolved := map[string][]collections.Record{
+		"uk-skilled-worker-sponsor": {
+			{Name: "APPLE LTD", Meta: map[string]string{"town": "Liverpool", "route": "Skilled Worker"}},
+		},
+	}
+	got := plan(credentialRows(), resolved)
+	if s := got.stats["uk-skilled-worker-sponsor"]; s.Gated != 1 {
+		t.Errorf("gated = %d, want 1 (apple matched by name but failed the gate)", s.Gated)
+	}
+}
+
+func TestResolveOne_TreatsAZeroRecordParseAsFailure(t *testing.T) {
+	// A source that has changed shape parses to zero rows just as convincingly as a
+	// genuinely empty register. Letting it through would reconcile the tag off every
+	// company, so it must fail like a fetch failure does.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("[]"))
+	}))
+	defer srv.Close()
+
+	c := collections.Collection{
+		Slug:    "x",
+		Kind:    collections.KindEditorial,
+		Dataset: &collections.Dataset{URL: srv.URL, Parse: func([]byte) ([]collections.Record, error) { return nil, nil }},
+	}
+	if _, err := resolveOne(context.Background(), srv.Client(), c); err == nil {
+		t.Error("resolveOne accepted a dataset that parsed to no records")
+	}
+}
+
+func TestResolveOne_FetchesFromTheDatasetResolver(t *testing.T) {
+	var fetched string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetched = r.URL.Path
+		w.Write([]byte("payload"))
+	}))
+	defer srv.Close()
+
+	c := collections.Collection{
+		Slug: "x",
+		Kind: collections.KindEditorial,
+		Dataset: &collections.Dataset{
+			ResolveURL: func(context.Context, *http.Client) (string, error) { return srv.URL + "/resolved.csv", nil },
+			Parse:      func([]byte) ([]collections.Record, error) { return []collections.Record{{Name: "Acme"}}, nil },
+		},
+	}
+	got, err := resolveOne(context.Background(), srv.Client(), c)
+	if err != nil {
+		t.Fatalf("resolveOne: %v", err)
+	}
+	if fetched != "/resolved.csv" {
+		t.Errorf("fetched %q, want the resolver's URL", fetched)
+	}
+	if len(got) != 1 {
+		t.Errorf("records = %+v, want one", got)
+	}
+}
+
+func TestResolveOne_PropagatesAResolverFailure(t *testing.T) {
+	c := collections.Collection{
+		Slug: "x",
+		Kind: collections.KindCredential,
+		Dataset: &collections.Dataset{
+			ResolveURL: func(context.Context, *http.Client) (string, error) { return "", errors.New("no csv link") },
+			Parse:      func([]byte) ([]collections.Record, error) { return nil, nil },
+		},
+	}
+	if _, err := resolveOne(context.Background(), http.DefaultClient, c); err == nil {
+		t.Error("resolveOne swallowed a resolver failure")
+	}
+}
+
+func TestPlan_ReportsHQCountryCoverage(t *testing.T) {
+	// The dry run is read for this number: the single-token credential rule is only
+	// as good as hq_country's coverage.
+	got := plan(credentialRows(), nil)
+	if got.withHQCountry != 2 {
+		t.Errorf("withHQCountry = %d, want 2 of 3 rows", got.withHQCountry)
 	}
 }

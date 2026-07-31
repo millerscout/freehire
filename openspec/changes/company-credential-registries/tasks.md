@@ -27,10 +27,10 @@
 
 ## 5. Import worker
 
-- [ ] 5.1 Widen `ListCompanyCollections` in `internal/db/queries/companies.sql` to `slug, collections, countries, hq_country` and run `make sqlc`
-- [ ] 5.2 Rework `cmd/import-collections` for record-shaped resolve, per-dataset ambiguity precomputation, and gate application at match time
-- [ ] 5.3 Make an empty parse an abort-before-write failure alongside the existing fetch-failure abort; test that no membership is written in either case
-- [ ] 5.4 Add `-dry-run` reporting matched / gated-out / unmatched per collection and writing nothing; test that no write path is reached
+- [x] 5.1 Widen `ListCompanyCollections` in `internal/db/queries/companies.sql` to `slug, collections, countries, hq_country` and run `make sqlc`
+- [x] 5.2 Rework `cmd/import-collections` for record-shaped resolve, per-dataset ambiguity precomputation, and gate application at match time
+- [x] 5.3 Make an empty parse an abort-before-write failure alongside the existing fetch-failure abort; test that no membership is written in either case
+- [x] 5.4 Add `-dry-run` reporting matched / gated-out / unmatched per collection and writing nothing; test that no write path is reached
 
 ## 6. Generated frontend contract
 

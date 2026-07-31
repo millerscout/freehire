@@ -65,17 +65,33 @@ func TestHandListSlugs_AreCanonical(t *testing.T) {
 	}
 }
 
-func TestMatch_SplitsPresentAndAbsentDedupedSorted(t *testing.T) {
-	existing := map[string]struct{}{"stripe": {}, "airbnb": {}}
-	// "Stripe" and "stripe " both normalize to stripe (dup); "Airbnb" matches;
+func TestMembers_SplitsPresentAndAbsentDedupedSorted(t *testing.T) {
+	companies := map[string]Company{"stripe": {Slug: "stripe"}, "airbnb": {Slug: "airbnb"}}
+	// "Stripe" and "stripe" both normalize to stripe (dup); "Airbnb" matches;
 	// "Unknown Co" does not.
-	matched, unmatched := Match([]string{"Stripe", "stripe", "Airbnb", "Unknown Co"}, existing)
+	c := Collection{Slug: "x", Kind: KindEditorial}
+	matched, stat := c.Members([]Record{{Name: "Stripe"}, {Name: "stripe"}, {Name: "Airbnb"}, {Name: "Unknown Co"}}, companies)
 
 	if !reflect.DeepEqual(matched, []string{"airbnb", "stripe"}) {
 		t.Errorf("matched = %#v, want [airbnb stripe] (deduped, sorted)", matched)
 	}
-	if !reflect.DeepEqual(unmatched, []string{"Unknown Co"}) {
-		t.Errorf("unmatched = %#v, want [Unknown Co]", unmatched)
+	if !reflect.DeepEqual(stat.UnmatchedNames, []string{"Unknown Co"}) {
+		t.Errorf("unmatched = %#v, want [Unknown Co]", stat.UnmatchedNames)
+	}
+	if stat.Gated != 0 || stat.Ambiguous != 0 {
+		t.Errorf("an editorial collection reported gate/ambiguity counts: %+v", stat)
+	}
+}
+
+func TestMembers_EditorialMatchingDoesNotStripLegalForms(t *testing.T) {
+	// The suffix strip belongs to credentials only. An editorial dataset naming
+	// "Acme Robotics Limited" must still land on acme-robotics-limited, not on a
+	// different company called acme-robotics.
+	companies := map[string]Company{"acme-robotics-limited": {Slug: "acme-robotics-limited"}}
+	c := Collection{Slug: "x", Kind: KindEditorial}
+	matched, _ := c.Members([]Record{{Name: "Acme Robotics Limited"}}, companies)
+	if !reflect.DeepEqual(matched, []string{"acme-robotics-limited"}) {
+		t.Errorf("editorial match = %#v, want [acme-robotics-limited]", matched)
 	}
 }
 

@@ -1,19 +1,28 @@
-// Command import-collections populates the curated-collection membership defined
-// in internal/collections. For each collection it resolves the member companies —
-// a static hand list (e.g. bigtech) or a remote name dataset (e.g. yc, unicorn),
-// matched to our companies by normalized name — writes companies.collections
-// (reconciling only the tags it manages so any other tags survive), then
-// denormalizes the result onto jobs.collections. It is a run-once-and-exit worker;
-// a search reindex is required afterwards to surface the changes in the facet index.
+// Command import-collections populates the company-tag membership defined in
+// internal/collections. For each entry it resolves the member companies — a static
+// hand list (e.g. bigtech), a remote dataset (e.g. yc, unicorn), or a public
+// register (the UK and NL visa-sponsor credentials) — matches them onto our
+// companies, applies the entry's gate where it has one, writes
+// companies.collections (reconciling only the tags it manages so any other tags
+// survive), then denormalizes the result onto jobs.collections. It is a
+// run-once-and-exit worker; a search reindex is required afterwards to surface the
+// changes in the facet index.
 //
 // Idempotent: re-running with the same inputs writes the same membership and
-// changes nothing on the second pass. If any collection's dataset cannot be
-// resolved the run aborts before writing — a partial resolve would otherwise drop
-// that collection's tags from every company.
+// changes nothing on the second pass. If any collection's source cannot be
+// resolved — a failed fetch, or a payload that parses to no records — the run
+// aborts before writing, because a partial resolve would otherwise drop that
+// collection's tags from every company.
+//
+// Run with -dry-run first when a gate or threshold has changed: it resolves,
+// matches, and gates exactly as a real run does, reports the outcome per
+// collection, and writes nothing.
 package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -31,7 +40,12 @@ import (
 // fetchTimeout bounds each dataset download so a stalled endpoint can't hang the run.
 const fetchTimeout = 60 * time.Second
 
+// dryRun resolves, matches, and gates exactly as a real run does, reports what it
+// would write, and writes nothing.
+var dryRun = flag.Bool("dry-run", false, "resolve and match, report the outcome, write nothing")
+
 func main() {
+	flag.Parse()
 	worker.Main(run)
 }
 
@@ -61,6 +75,18 @@ func run() int {
 	}
 
 	p := plan(rows, resolved)
+
+	// A dry run stops here, before the first write. Every threshold in the credential
+	// gates is a guess until it is measured against the real catalogue — in
+	// particular the single-token rule leans on hq_country, and if that column is
+	// sparse the rule discards exactly the single-word brands worth surfacing. This
+	// is how that gets answered before it can do damage rather than after.
+	if *dryRun {
+		report(p, len(rows))
+		log.Printf("import-collections: dry run — %d companies would be updated, nothing written", len(p.writes))
+		return 0
+	}
+
 	for _, w := range p.writes {
 		if err := q.SetCompanyCollections(ctx, w); err != nil {
 			log.Printf("import-collections: set %q: %v", w.Slug, err)
@@ -74,19 +100,34 @@ func run() int {
 		return 1
 	}
 
-	for _, c := range collections.All {
-		s := p.stats[c.Slug]
-		log.Printf("import-collections: %s matched=%d unmatched=%d", c.Slug, s.matched, s.unmatched)
-		// For a hand list the unmatched entries are actionable (a typo'd slug, or a
-		// marquee company we don't ingest yet), so list them. Datasets have thousands
-		// of unmatched names — only their count is logged, above.
-		if len(s.unmatchedNames) > 0 {
-			log.Printf("import-collections: %s unmatched entries: %s", c.Slug, strings.Join(s.unmatchedNames, ", "))
-		}
-	}
+	report(p, len(rows))
 	log.Printf("import-collections done: companies updated=%d, jobs updated=%d", len(p.writes), propagated)
 	log.Printf("import-collections: run `make reindex` to surface jobs.collections in the search index")
 	return 0
+}
+
+// report logs how each collection's candidates fell out. Credentials additionally
+// report what their gate and ambiguity guard rejected — the numbers a dry run is
+// read for — and how densely hq_country is populated, since the single-token rule
+// depends on it.
+func report(p planResult, companies int) {
+	for _, c := range collections.All {
+		s := p.stats[c.Slug]
+		if c.Kind == collections.KindCredential {
+			log.Printf("import-collections: %s matched=%d gated=%d ambiguous=%d unmatched=%d",
+				c.Slug, s.Matched, s.Gated, s.Ambiguous, s.Unmatched)
+			continue
+		}
+		log.Printf("import-collections: %s matched=%d unmatched=%d", c.Slug, s.Matched, s.Unmatched)
+		// For a hand list the unmatched entries are actionable (a typo'd slug, or a
+		// marquee company we don't ingest yet), so list them. Datasets have thousands
+		// of unmatched names — only their count is logged, above.
+		if len(s.UnmatchedNames) > 0 {
+			log.Printf("import-collections: %s unmatched entries: %s", c.Slug, strings.Join(s.UnmatchedNames, ", "))
+		}
+	}
+	log.Printf("import-collections: hq_country known for %d/%d companies (the single-token credential rule depends on it)",
+		p.withHQCountry, companies)
 }
 
 // resolveAll returns, per collection slug, its candidate company names (or slugs
@@ -94,32 +135,61 @@ func run() int {
 // collection is fetched and parsed. Any resolution failure is returned (the caller
 // aborts rather than write a partial membership).
 func resolveAll(ctx context.Context) (map[string][]collections.Record, error) {
+	client := &http.Client{Timeout: fetchTimeout}
 	resolved := make(map[string][]collections.Record, len(collections.All))
 	for _, c := range collections.All {
-		switch {
-		case c.Slugs != nil:
-			resolved[c.Slug] = slugRecords(c.Slugs)
-		case c.Dataset != nil:
-			var (
-				records []collections.Record
-				err     error
-			)
-			if len(c.Dataset.Data) > 0 {
-				// Embedded, in-repo dataset (e.g. eastern-roots): parse the bundled
-				// bytes directly, no network fetch.
-				records, err = c.Dataset.Parse(c.Dataset.Data)
-			} else {
-				records, err = fetchDataset(ctx, datasetURL(c), c.Dataset.Parse)
-			}
-			if err != nil {
-				return nil, fmt.Errorf("resolve %q: %w", c.Slug, err)
-			}
-			resolved[c.Slug] = records
-		default:
-			return nil, fmt.Errorf("collection %q has no membership source", c.Slug)
+		records, err := resolveOne(ctx, client, c)
+		if err != nil {
+			return nil, fmt.Errorf("resolve %q: %w", c.Slug, err)
 		}
+		resolved[c.Slug] = records
 	}
 	return resolved, nil
+}
+
+// resolveOne resolves a single collection's members. A dataset whose payload parses
+// to nothing is an error, not an empty membership: a successful fetch of a source
+// that has changed shape parses to zero rows just as convincingly as a genuinely
+// empty register would, and letting it through would reconcile that collection's
+// tag off every company. That is the same reasoning as the fetch-failure abort,
+// applied to the failure mode a fetch check cannot see.
+func resolveOne(ctx context.Context, client *http.Client, c collections.Collection) ([]collections.Record, error) {
+	if c.Slugs != nil {
+		return slugRecords(c.Slugs), nil
+	}
+	if c.Dataset == nil {
+		return nil, errors.New("collection has no membership source")
+	}
+	if !c.Dataset.Valid() {
+		return nil, errors.New("collection declares no single dataset source")
+	}
+
+	// Embedded, in-repo dataset (e.g. eastern-roots): parse the bundled bytes
+	// directly, no network fetch.
+	if len(c.Dataset.Data) > 0 {
+		return nonEmpty(c.Dataset.Parse(c.Dataset.Data))
+	}
+
+	url, err := datasetURL(ctx, client, c)
+	if err != nil {
+		return nil, err
+	}
+	body, err := fetchDataset(ctx, client, url)
+	if err != nil {
+		return nil, err
+	}
+	return nonEmpty(c.Dataset.Parse(body))
+}
+
+// nonEmpty turns a zero-record parse into an error. See resolveOne.
+func nonEmpty(records []collections.Record, err error) ([]collections.Record, error) {
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, errors.New("dataset parsed to no records")
+	}
+	return records, nil
 }
 
 // slugRecords lifts a hand list of canonical company slugs into the record shape a
@@ -132,28 +202,13 @@ func slugRecords(slugs []string) []collections.Record {
 	return out
 }
 
-// recordNames projects a record list down to the names the matcher works on.
-func recordNames(records []collections.Record) []string {
-	out := make([]string, len(records))
-	for i, r := range records {
-		out[i] = r.Name
-	}
-	return out
-}
-
-// matchStat is the per-collection match outcome, logged at the end of a run.
-// unmatchedNames holds the verbatim unmatched entries for hand-list collections
-// (small and actionable); it is left empty for datasets (their unmatched set runs
-// to thousands, so only the count is kept).
-type matchStat struct {
-	matched, unmatched int
-	unmatchedNames     []string
-}
-
 // planResult is the computed membership change plus the per-collection match stats.
 type planResult struct {
 	writes []db.SetCompanyCollectionsParams
-	stats  map[string]matchStat
+	stats  map[string]collections.MatchStat
+	// withHQCountry counts companies with a known headquarters country, reported
+	// because the single-token credential rule is only as good as that column.
+	withHQCountry int
 }
 
 // plan computes the membership change for every company: it matches each
@@ -167,13 +222,27 @@ func plan(rows []db.ListCompanyCollectionsRow, resolved map[string][]collections
 		existing[r.Slug] = struct{}{}
 	}
 
+	companies := make(map[string]collections.Company, len(rows))
+	withHQCountry := 0
+	for _, r := range rows {
+		companies[r.Slug] = collections.Company{
+			Slug:      r.Slug,
+			Countries: r.Countries,
+			HQCountry: r.HqCountry.String,
+		}
+		if r.HqCountry.String != "" {
+			withHQCountry++
+		}
+	}
+
 	want := make(map[string][]string)
-	stats := make(map[string]matchStat, len(resolved))
+	stats := make(map[string]collections.MatchStat, len(resolved))
 	for _, c := range collections.All {
-		matched, unmatched := collections.Match(recordNames(resolved[c.Slug]), existing)
-		s := matchStat{matched: len(matched), unmatched: len(unmatched)}
+		matched, s := c.Members(resolved[c.Slug], companies)
 		if c.Slugs != nil { // hand list: keep the unmatched entries for diagnostics
-			s.unmatchedNames = unmatched
+			s.UnmatchedNames = s.UnmatchedNames[:min(len(s.UnmatchedNames), collections.MaxLoggedUnmatched)]
+		} else {
+			s.UnmatchedNames = nil
 		}
 		stats[c.Slug] = s
 		for _, slug := range matched {
@@ -193,7 +262,7 @@ func plan(rows []db.ListCompanyCollectionsRow, resolved map[string][]collections
 		}
 	}
 
-	return planResult{writes: writes, stats: stats}
+	return planResult{writes: writes, stats: stats, withHQCountry: withHQCountry}
 }
 
 // normalizedCurrent sorts a copy of the stored collections so the change check
@@ -205,19 +274,26 @@ func normalizedCurrent(current []string) []string {
 	return cp
 }
 
-// datasetURL returns a collection's dataset URL, honouring a <SLUG>_DATASET_URL
-// environment override (e.g. YC_DATASET_URL, UNICORN_DATASET_URL).
-func datasetURL(c collections.Collection) string {
-	env := strings.ToUpper(c.Slug) + "_DATASET_URL"
+// datasetURL returns the address to fetch a collection's dataset from. A
+// <SLUG>_DATASET_URL environment override wins (e.g. YC_DATASET_URL), then the
+// dataset's own resolver where it has one — the GOV.UK register republishes at a
+// new dated URL each month, so its address is discovered per run — then its fixed
+// URL. The override is honoured ahead of the resolver so a run can be pinned to a
+// downloaded snapshot without touching the network.
+func datasetURL(ctx context.Context, client *http.Client, c collections.Collection) (string, error) {
+	env := strings.ToUpper(strings.ReplaceAll(c.Slug, "-", "_")) + "_DATASET_URL"
 	if u := os.Getenv(env); u != "" {
-		return u
+		return u, nil
 	}
-	return c.Dataset.URL
+	if c.Dataset.ResolveURL != nil {
+		return c.Dataset.ResolveURL(ctx, client)
+	}
+	return c.Dataset.URL, nil
 }
 
-// fetchDataset downloads a dataset URL and runs its parser. The URLs are constants
-// we control (not user input), so a plain client is appropriate.
-func fetchDataset(ctx context.Context, url string, parse func([]byte) ([]collections.Record, error)) ([]collections.Record, error) {
+// fetchDataset downloads a dataset URL. The URLs are ours or resolved from a source
+// we control, not user input, so a plain client is appropriate.
+func fetchDataset(ctx context.Context, client *http.Client, url string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
 
@@ -225,7 +301,7 @@ func fetchDataset(ctx context.Context, url string, parse func([]byte) ([]collect
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -233,9 +309,5 @@ func fetchDataset(ctx context.Context, url string, parse func([]byte) ([]collect
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("dataset %s: status %d", url, resp.StatusCode)
 	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	return parse(body)
+	return io.ReadAll(resp.Body)
 }
