@@ -7,15 +7,15 @@
 
 ## 2. Company-name normalization for registers
 
-- [ ] 2.1 Add legal-suffix stripping to `internal/collections` (whole word, end of string only: `Ltd`, `Limited`, `PLC`, `LLP`, `CIC`, `B.V.`, `N.V.` and their punctuation variants), applied before `normalize.Slug`
-- [ ] 2.2 Test that `ACME ROBOTICS LIMITED` normalizes to `acme-robotics`, that `LIMITED BRANDS INC` keeps its leading `Limited`, and that a name that is only a suffix is not reduced to empty
+- [x] 2.1 Add legal-suffix stripping to `internal/collections` (whole word, end of string only: `Ltd`, `Limited`, `PLC`, `LLP`, `CIC`, `B.V.`, `N.V.` and their punctuation variants), applied before `normalize.Slug`
+- [x] 2.2 Test that `ACME ROBOTICS LIMITED` normalizes to `acme-robotics`, that `LIMITED BRANDS INC` keeps its leading `Limited`, and that a name that is only a suffix is not reduced to empty
 
 ## 3. Matching guards
 
-- [ ] 3.1 Implement the geography gate: the register's country present in the company's `countries` satisfies a name of two or more tokens
-- [ ] 3.2 Implement the single-token rule: a one-token normalized name additionally requires `hq_country` to equal the register's country; test that a company with UK jobs but a non-UK headquarters is rejected and one headquartered in the UK is accepted
-- [ ] 3.3 Implement the ambiguity guard: precompute normalized-name counts per dataset and grant nothing for a name occurring more than once; test that both candidates are left untagged
-- [ ] 3.4 Implement the UK route gate over `Record.Meta`: tag only when at least one row carries Skilled Worker, any Global Business Mobility route, or Scale-up; test that a Temporary-Worker-only company is rejected while its rows are still parsed
+- [x] 3.1 Implement the geography gate: the register's country present in the company's `countries` satisfies a name of two or more tokens
+- [x] 3.2 Implement the single-token rule: a one-token normalized name additionally requires `hq_country` to equal the register's country; test that a company with UK jobs but a non-UK headquarters is rejected and one headquartered in the UK is accepted
+- [x] 3.3 Implement the ambiguity guard: precompute normalized-name counts per dataset and grant nothing for a name occurring more than once; test that both candidates are left untagged
+- [x] 3.4 Implement the UK route gate over `Record.Meta`: tag only when at least one row carries Skilled Worker, any Global Business Mobility route, or Scale-up; test that a Temporary-Worker-only company is rejected while its rows are still parsed
 
 ## 4. Register sources
 

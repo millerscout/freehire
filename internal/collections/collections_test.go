@@ -197,6 +197,58 @@ func TestRecord_CarriesSourceMetadata(t *testing.T) {
 	}
 }
 
+func TestRegisterSlug_StripsTrailingLegalSuffix(t *testing.T) {
+	cases := []struct{ in, want string }{
+		// normalize.Slug alone yields acme-robotics-limited, which never matches our
+		// acme-robotics — the whole reason this step exists.
+		{"ACME ROBOTICS LIMITED", "acme-robotics"},
+		{"Acme Robotics Ltd", "acme-robotics"},
+		{"Acme Robotics Ltd.", "acme-robotics"},
+		{"Monzo Bank PLC", "monzo-bank"},
+		{"Foo Bar LLP", "foo-bar"},
+		{"Community Co CIC", "community-co"},
+		{"Booking B.V.", "booking"},
+		{"Adyen N.V.", "adyen"},
+		{"Adyen NV", "adyen"},
+		// No suffix to strip.
+		{"Monzo", "monzo"},
+		{"Deliveroo", "deliveroo"},
+	}
+	for _, tc := range cases {
+		if got := RegisterSlug(tc.in); got != tc.want {
+			t.Errorf("RegisterSlug(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestRegisterSlug_OnlyStripsAtTheEnd(t *testing.T) {
+	// "Limited" leading the name is part of the name, not a legal form.
+	if got := RegisterSlug("LIMITED BRANDS INC"); got != "limited-brands-inc" {
+		t.Errorf("RegisterSlug(LIMITED BRANDS INC) = %q, want limited-brands-inc", got)
+	}
+	if got := RegisterSlug("Limited Brands"); got != "limited-brands" {
+		t.Errorf("RegisterSlug(Limited Brands) = %q, want limited-brands", got)
+	}
+}
+
+func TestRegisterSlug_NeverReducesANameToNothing(t *testing.T) {
+	// A register row that is nothing but a legal form must not normalize to the empty
+	// slug — an empty slug would match nothing, but stripping to it hides a bad row.
+	for _, in := range []string{"Limited", "LTD", "B.V."} {
+		if got := RegisterSlug(in); got == "" {
+			t.Errorf("RegisterSlug(%q) stripped the whole name away", in)
+		}
+	}
+}
+
+func TestRegisterSlug_StripsOnlyOneSuffix(t *testing.T) {
+	// Chained forms are rare and ambiguous; strip one and stop rather than peel a
+	// name down to a fragment.
+	if got := RegisterSlug("Acme Holdings Ltd"); got != "acme-holdings" {
+		t.Errorf("RegisterSlug(Acme Holdings Ltd) = %q, want acme-holdings", got)
+	}
+}
+
 func TestGate_NilAdmitsEveryNameMatch(t *testing.T) {
 	c := Collection{Slug: "x", Kind: KindEditorial}
 	if !c.Admits(Company{Slug: "acme"}, Record{Name: "Acme"}) {

@@ -111,9 +111,15 @@ tagged on a guess.
   headquarters country SHALL equal the register's country. A single-token name is
   too weak a signal on its own: a multinational with a local office would otherwise
   inherit a credential from an unrelated local business of the same name.
-- **Ambiguity guard.** A normalized name occurring more than once across distinct
-  entries in a register SHALL be treated as too generic to assign, and SHALL grant
-  the credential to no company.
+- **Ambiguity guard.** A normalized name shared by more than one *organisation* in
+  a register SHALL be treated as identifying none of them, and SHALL grant the
+  credential to no company. Organisations SHALL be told apart by a register-specific
+  identity field (the UK register's town, the Dutch register's KvK number) — a
+  shared name alone is not a collision, because the UK register lists a single
+  organisation once per sponsorship route it holds, and those rows must survive for
+  the route gate to read them. Where a register publishes no such identity field,
+  same-named rows SHALL be treated as one organisation and the geography guards
+  SHALL carry the decision.
 
 #### Scenario: A legal suffix is stripped from the end of a register name
 
@@ -147,9 +153,17 @@ tagged on a guess.
 
 #### Scenario: An ambiguous name is assigned to nobody
 
-- **WHEN** a normalized register name appears for two distinct register entries
+- **WHEN** a normalized register name appears for two organisations with different
+  identity fields (different towns)
 - **THEN** no company receives the credential from that name, regardless of any
   other guard passing
+
+#### Scenario: One organisation's per-route rows are not mistaken for a collision
+
+- **WHEN** a register lists one organisation on several routes, so its name repeats
+  across rows sharing the same identity field
+- **THEN** every one of those rows survives the ambiguity guard and reaches the
+  route gate
 
 ### Requirement: A credential is presented so it is never read as a promise about a role
 
