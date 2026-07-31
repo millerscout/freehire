@@ -36,7 +36,13 @@
 </script>
 
 <div class="flex flex-wrap gap-2">
-  {#each shown as opt (opt.value)}
+  {#each shown as opt, i (opt.value)}
+    <!-- An option opening a new group gets a full-width sub-heading above it, so a
+         facet mixing two sorts of option (curated collections and verifiable
+         credentials) reads as two lists without becoming two facets. -->
+    {#if opt.group && opt.group !== shown[i - 1]?.group}
+      <p class="w-full pt-1 text-xs font-medium text-muted-foreground">{opt.group}</p>
+    {/if}
     {@const excluded = exclude.includes(opt.value)}
     {@const included = include.includes(opt.value)}
     <button

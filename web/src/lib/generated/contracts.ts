@@ -2134,7 +2134,7 @@ export const ROLE_ALIASES = {
   'business_analyst': ['business analyst'],
   'c_level': ['ceo', 'chief', 'cpo', 'cto', 'head of', 'vice president', 'vp', 'директор', 'руководитель'],
   'chief_of_staff': ['chief of staff'],
-  'chip_designer': ['analog design engineer', 'analogue design engineer', 'asic design engineer', 'chip design engineer', 'dft design engineer', 'digital design engineer', 'ic design engineer', 'memory design engineer', 'mixed signal design engineer', 'mixed-signal design engineer', 'physical design engineer', 'rf design engineer', 'rfic design engineer', 'rtl design engineer', 'semiconductor design engineer', 'silicon design engineer', 'soc design engineer', 'vlsi design engineer'],
+  'chip_designer': ['analog design engineer', 'analogue design engineer', 'asic design engineer', 'chip design engineer', 'dft design engineer', 'digital design engineer', 'ic design engineer', 'memory design engineer', 'mixed signal design engineer', 'mixed-signal design engineer', 'physical design engineer', 'rf design engineer', 'rfic design engineer', 'rtl design engineer', 'semiconductor design engineer', 'silicon design engineer', 'soc design engineer', 'standard cell design engineer', 'vlsi design engineer'],
   'civil_designer': ['civil design engineer', 'civil designer', 'structural designer'],
   'cloud_architect': ['cloud architect'],
   'cloud_engineer': ['cloud engineer'],
@@ -2267,3 +2267,19 @@ export const ROLE_ALIASES = {
   'web_designer': ['web designer'],
 } as const;
 export type RoleAliases = typeof ROLE_ALIASES;
+export const COLLECTIONS = [
+  { slug: 'yc', title: 'Y Combinator', description: 'Open roles at Y Combinator–backed companies, from current batches to graduated unicorns.', kind: 'editorial' },
+  { slug: 'techstars', title: 'Techstars', description: 'Open roles at Techstars-backed companies.', kind: 'editorial' },
+  { slug: 'european', title: 'European Startups', description: 'Open roles at European startups across the continent\'s tech hubs.', kind: 'editorial' },
+  { slug: 'ai', title: 'AI Companies', description: 'Open roles at AI-native companies — foundation-model labs, ML platforms and applied-AI products.', kind: 'editorial' },
+  { slug: 'mag7', title: 'Magnificent Seven', description: 'Open roles at the Magnificent Seven — Apple, Microsoft, Alphabet, Amazon, Meta, Nvidia and Tesla.', kind: 'editorial' },
+  { slug: 'bigtech', title: 'Big Tech', description: 'Open roles at the largest, most established technology companies.', kind: 'editorial' },
+  { slug: 'unicorn', title: 'Unicorns', description: 'Open roles at unicorns — private companies valued at over $1 billion.', kind: 'editorial' },
+  { slug: 'fortune500', title: 'Fortune 500', description: 'Open roles at Fortune 500 companies — the largest US corporations by revenue.', kind: 'editorial' },
+  { slug: 'eastern-roots', title: 'Eastern Roots', description: 'Open roles at globally distributed companies founded by Eastern European (incl. Russian-speaking) founders or with Eastern European engineering roots.', kind: 'editorial' },
+  { slug: 'ai-native', title: 'AI-Native', description: 'Open roles at AI-native companies building AI-first products and infrastructure — model and inference APIs, vector databases, and agent/dev tooling.', kind: 'editorial' },
+  { slug: 'uk-skilled-worker-sponsor', title: 'Licensed UK sponsor', description: 'Open roles at employers on the GOV.UK register of licensed sponsors for the Skilled Worker and related work routes. The licence belongs to the employer — it is not a commitment to sponsor any particular role.', kind: 'credential' },
+  { slug: 'nl-recognised-sponsor', title: 'Licensed NL sponsor', description: 'Open roles at employers on the IND public register of recognised sponsors for work and highly skilled migrants. The recognition belongs to the employer — it is not a commitment to sponsor any particular role.', kind: 'credential' },
+] as const;
+export type Collection = (typeof COLLECTIONS)[number];
+export type CollectionKind = Collection['kind'];

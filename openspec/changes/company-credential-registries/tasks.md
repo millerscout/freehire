@@ -34,15 +34,15 @@
 
 ## 6. Generated frontend contract
 
-- [ ] 6.1 Emit the collection registry (slug, title, description, kind) from `cmd/gen-contracts` into `web/src/lib/generated/contracts.ts`; run `make gen-contracts` and commit the output
-- [ ] 6.2 Point `web/src/lib/facets.ts` and the `/collections` hub at the generated registry, delete the hand-kept `COLLECTIONS` from `web/src/lib/collections.ts`, and leave `FILTER_COLLECTIONS` where it is
+- [x] 6.1 Emit the collection registry (slug, title, description, kind) from `cmd/gen-contracts` into `web/src/lib/generated/contracts.ts`; run `make gen-contracts` and commit the output
+- [x] 6.2 Point `web/src/lib/facets.ts` and the `/collections` hub at the generated registry, delete the hand-kept `COLLECTIONS` from `web/src/lib/collections.ts`, and leave `FILTER_COLLECTIONS` where it is
 
 ## 7. UI
 
-- [ ] 7.1 Verify whether the filter machinery tolerates two facet specs on the `collections` param; if not, render one spec whose options carry group headings — record which way it went
-- [ ] 7.2 Split the collection facet options by `kind` into "Collections" and "Credentials" groups in the FilterModal
+- [x] 7.1 Verify whether the filter machinery tolerates two facet specs on the `collections` param; if not, render one spec whose options carry group headings  — VERDICT: it does not. filtersToParams iterates FACETS and would append every value twice, activeFilterCount would double. Shipped as one facet whose options carry a `group`, with a sub-heading in PillGroup; a test pins the single-entry invariant
+- [x] 7.2 Split the collection facet options by `kind` into "Collections" and "Credentials" groups in the FilterModal
 - [ ] 7.3 Add the credential badge to the job card and the company page, naming the issuing register and carrying the disclaimer that the licence belongs to the employer and is not a promise of sponsorship for that role
-- [ ] 7.4 Verify the `/collections/uk-skilled-worker-sponsor` landing page renders server-side with its canonical and breadcrumb JSON-LD, as the existing landing-page machinery should give for free
+- [x] 7.4 Verify the `/collections/uk-skilled-worker-sponsor` landing page renders server-side with its canonical and breadcrumb JSON-LD, as the existing landing-page machinery should give for free
 
 ## 8. Verify and ship
 
