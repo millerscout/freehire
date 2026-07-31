@@ -28,10 +28,12 @@
   const shown = $derived(
     uniqueByValue([
       ...options,
+      // Ungrouped so it cannot appear under a heading it has nothing to do with;
+      // `shown` is re-sorted below to keep the grouped options contiguous.
       ...[...include, ...exclude]
         .filter((v) => !options.some((o) => o.value === v))
-        .map((v) => ({ value: v, label: v })),
-    ]),
+        .map((v) => ({ value: v, label: v, group: undefined })),
+    ]).sort((a, b) => Number(!!a.group) - Number(!!b.group)),
   );
 </script>
 

@@ -92,8 +92,40 @@ func RequireCountry(code string) func(Company, Record) bool {
 		if strings.Contains(RegisterSlug(r.Name), "-") {
 			return true // multi-token: the country facet carries it
 		}
-		return strings.EqualFold(co.HQCountry, code)
+		return countryMatches(co.HQCountry, code)
 	}
+}
+
+// countryAliases are the spellings a country may appear under in companies.hq_country,
+// beyond its ISO code. The column has two writers and only one normalizes:
+// cmd/import-yc runs values through location.Parse, while cmd/backfill-company-info
+// writes its upstream's `country` field verbatim. That upstream currently emits ISO
+// codes, so a bare code comparison happens to work today — but the gate must not
+// depend on a third party's formatting, because the failure is silent: a company
+// simply never earns a credential it qualifies for, and nothing logs it.
+//
+// Whole-value comparison only, never a substring: "New Great Britain Holdings" is a
+// company name, not a country.
+var countryAliases = map[string][]string{
+	"GB": {"uk", "united kingdom", "great britain", "england", "scotland", "wales"},
+	"NL": {"netherlands", "the netherlands", "holland"},
+}
+
+// countryMatches reports whether a stored country value denotes the given ISO code.
+func countryMatches(value, code string) bool {
+	if value == "" {
+		return false
+	}
+	if strings.EqualFold(value, code) {
+		return true
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(value), " "))
+	for _, alias := range countryAliases[strings.ToUpper(code)] {
+		if normalized == alias {
+			return true
+		}
+	}
+	return false
 }
 
 // RequireRoute builds the route gate: at least one of the organisation's register
@@ -168,7 +200,7 @@ func DropAmbiguous(records []Record, identityKey string) []Record {
 // depend on that).
 func hasCountry(countries []string, code string) bool {
 	for _, c := range countries {
-		if strings.EqualFold(c, code) {
+		if countryMatches(c, code) {
 			return true
 		}
 	}

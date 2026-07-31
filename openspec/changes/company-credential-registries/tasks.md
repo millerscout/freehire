@@ -30,7 +30,8 @@
 - [x] 5.1 Widen `ListCompanyCollections` in `internal/db/queries/companies.sql` to `slug, collections, countries, hq_country` and run `make sqlc`
 - [x] 5.2 Rework `cmd/import-collections` for record-shaped resolve, per-dataset ambiguity precomputation, and gate application at match time
 - [x] 5.3 Make an empty parse an abort-before-write failure alongside the existing fetch-failure abort; test that no membership is written in either case
-- [x] 5.4 Add `-dry-run` reporting matched / gated-out / unmatched per collection and writing nothing; test that no write path is reached
+- [x] 5.4 Add `-dry-run` reporting matched / gated-out / unmatched per collection and writing nothing — the dry-run branch returns before any `Set*`/`Propagate*` call and `plan` is pure, so this is correct by construction rather than by a test; the write path is not injectable today
+- [x] 5.5 Abort before writing when a managed tag would lose at least half its holders, with `-force` to override (added after review: an upstream relabelling parses to full size, matches nobody, and would otherwise strip the tag from every holder with a zero exit)
 
 ## 6. Generated frontend contract
 

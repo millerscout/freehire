@@ -265,3 +265,75 @@ func TestPlan_ReportsHQCountryCoverage(t *testing.T) {
 		t.Errorf("withHQCountry = %d, want 2 of 3 rows", got.withHQCountry)
 	}
 }
+
+func TestPlan_FlagsACollapseAsUnsafe(t *testing.T) {
+	// A source that parses fine but matches nobody is the failure the fetch and
+	// empty-parse aborts cannot see: GOV.UK renaming a route value leaves 142k rows
+	// intact, gates every one of them out, and Reconcile then strips the credential
+	// from every company that held it. Exit 0, no error, tag gone.
+	rows := []db.ListCompanyCollectionsRow{
+		{Slug: "monzo", Collections: []string{"uk-skilled-worker-sponsor"}, Countries: []string{"GB"}, HqCountry: pgtype.Text{String: "GB", Valid: true}},
+		{Slug: "acme-robotics", Collections: []string{"uk-skilled-worker-sponsor"}, Countries: []string{"GB"}},
+	}
+	// The register still parses, but every row is on a route the gate refuses.
+	resolved := map[string][]collections.Record{
+		"uk-skilled-worker-sponsor": {
+			{Name: "MONZO LTD", Meta: map[string]string{"town": "London", "route": "WORKER: SKILLED"}},
+			{Name: "ACME ROBOTICS LTD", Meta: map[string]string{"town": "London", "route": "WORKER: SKILLED"}},
+		},
+	}
+	got := plan(rows, resolved)
+	if len(got.collapsed) == 0 {
+		t.Fatal("a tag losing every one of its holders was not flagged")
+	}
+	if c := got.collapsed[0]; c.slug != "uk-skilled-worker-sponsor" || c.had != 2 || c.keeps != 0 {
+		t.Errorf("collapse = %+v, want uk-skilled-worker-sponsor had=2 keeps=0", c)
+	}
+}
+
+func TestPlan_DoesNotFlagAHealthyRun(t *testing.T) {
+	rows := []db.ListCompanyCollectionsRow{
+		{Slug: "monzo", Collections: []string{"uk-skilled-worker-sponsor"}, Countries: []string{"GB"}, HqCountry: pgtype.Text{String: "GB", Valid: true}},
+		{Slug: "acme-robotics", Collections: []string{"uk-skilled-worker-sponsor"}, Countries: []string{"GB"}},
+	}
+	resolved := map[string][]collections.Record{
+		"uk-skilled-worker-sponsor": {
+			{Name: "MONZO LTD", Meta: map[string]string{"town": "London", "route": "Skilled Worker"}},
+			{Name: "ACME ROBOTICS LTD", Meta: map[string]string{"town": "London", "route": "Skilled Worker"}},
+		},
+	}
+	if got := plan(rows, resolved); len(got.collapsed) != 0 {
+		t.Errorf("a healthy run was flagged as a collapse: %+v", got.collapsed)
+	}
+}
+
+func TestPlan_DoesNotFlagATagNobodyHeld(t *testing.T) {
+	// First run of a new credential: nothing held it, so losing nothing is not a
+	// collapse. Without this the guard would block every new collection's first run.
+	rows := []db.ListCompanyCollectionsRow{{Slug: "monzo", Countries: []string{"US"}}}
+	got := plan(rows, map[string][]collections.Record{
+		"uk-skilled-worker-sponsor": {{Name: "SOMEONE ELSE LTD", Meta: map[string]string{"route": "Skilled Worker"}}},
+	})
+	if len(got.collapsed) != 0 {
+		t.Errorf("a tag nobody held was flagged: %+v", got.collapsed)
+	}
+}
+
+func TestPlan_FlagsAMajorityLossNotJustATotalOne(t *testing.T) {
+	// A truncated upstream snapshot is a partial wipe with no error either.
+	rows := make([]db.ListCompanyCollectionsRow, 0, 10)
+	for _, s := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"} {
+		rows = append(rows, db.ListCompanyCollectionsRow{
+			Slug: s, Collections: []string{"uk-skilled-worker-sponsor"},
+			Countries: []string{"GB"}, HqCountry: pgtype.Text{String: "GB", Valid: true},
+		})
+	}
+	// Only two of the ten survive the truncated register.
+	resolved := map[string][]collections.Record{"uk-skilled-worker-sponsor": {
+		{Name: "a", Meta: map[string]string{"town": "London", "route": "Skilled Worker"}},
+		{Name: "b", Meta: map[string]string{"town": "Leeds", "route": "Skilled Worker"}},
+	}}
+	if got := plan(rows, resolved); len(got.collapsed) == 0 {
+		t.Error("losing 8 of 10 holders was not flagged")
+	}
+}

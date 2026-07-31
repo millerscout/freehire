@@ -75,6 +75,14 @@ After propagation the worker SHALL signal that a search reindex is required.
 Where a gate needs company attributes beyond the slug and the current tag set, the
 worker SHALL load those attributes alongside the membership it reconciles.
 
+The worker SHALL additionally abort before writing when a tag it manages would lose
+at least half of the companies currently holding it. This covers the failure the
+fetch and empty-parse aborts cannot see: a source whose values have been relabelled
+upstream still parses to its full row count and then matches nobody, which would
+otherwise reconcile the tag off every holder with no error. A tag no company
+currently holds SHALL NOT trigger this — that is a new collection's first run — and
+an explicit override SHALL be available for a run where the loss is genuine.
+
 The worker SHALL support a **dry run** that performs every resolve, match, and gate
 evaluation and reports what it would write — per collection, the number of matched,
 gated-out, and unmatched candidates — without writing any membership. A dry run
@@ -114,11 +122,25 @@ SHALL leave the database untouched.
 - **THEN** the company is not tagged for that collection, and every other tag it
   holds is preserved
 
+#### Scenario: A collapsing tag aborts the run
+
+- **WHEN** a source parses to its usual size but, after gating, would leave a managed
+  tag with fewer than half its current holders
+- **THEN** the worker reports the shortfall and aborts before writing, unless the
+  override is given
+
+#### Scenario: A new collection's first run is not treated as a collapse
+
+- **WHEN** a newly added collection matches some companies and no company currently
+  holds its tag
+- **THEN** the run proceeds and writes the new membership
+
 #### Scenario: A dry run reports without writing
 
 - **WHEN** the worker runs in dry-run mode
-- **THEN** it reports the matched, gated-out, and unmatched counts per collection,
-  and neither `companies.collections` nor `jobs.collections` is modified
+- **THEN** it reports the matched, gated-out, and unmatched counts per collection
+  along with any tag that would collapse, and neither `companies.collections` nor
+  `jobs.collections` is modified
 
 ### Requirement: Collections are a job-search facet plus a discovery hub
 

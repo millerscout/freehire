@@ -77,13 +77,13 @@ Every threshold above is a guess until measured against the real catalogue. The 
 
 **`hq_country` is sparse → the single-token rule discards the best UK brands.** → The mandatory pre-write `-dry-run` measures this directly. If the coverage is poor, the fallback is to widen single-token acceptance to `countries` plus a corroborating signal (a `.co.uk` domain in `companies.domains`, or a UK city on the company's jobs) rather than to drop the guard.
 
-**GOV.UK changes the Content API payload or the page markup → the parse breaks.** → The existing abort-before-write is what makes this safe: a failed resolve or a zero-row parse aborts the run, so a broken parser cannot strip the credential off every company. This is upgraded from an implicit property to a spec'd requirement, with the empty-parse case made explicit.
+**GOV.UK changes the Content API payload or the page markup → the parse breaks.** → Three aborts cover the three shapes this failure takes. A failed fetch or resolve aborts (pre-existing). A zero-row parse aborts (added here). And a run in which a tag would lose most of its current holders aborts (added after review): an upstream *relabelling* — a renamed route value, a recased column — leaves the row count fully intact, parses cleanly, matches nobody, and would otherwise reconcile the credential off every company with a zero exit code. A truncated snapshot is the same failure at partial scale. `-force` overrides it for the rare run where the loss is genuine.
 
 **A closing UK office silently revokes the badge.** → `companies.countries` is job-derived; when a company's last UK job closes, `GB` leaves the facet and the next import drops the credential even though the licence is intact. This is the correct behaviour (we do not advertise sponsorship where nobody is hiring) but it is surprising, so it is documented rather than fixed.
 
 **Two filter specs on one query parameter may not be supported.** → `web/src/lib/facets.ts` declares `{ param: 'collections', control: 'pills' }`, and it is unverified whether the filter machinery tolerates two specs writing the same param. Verify during implementation; if it does not, render one spec whose options carry a group heading. This affects presentation only — the query contract is one `collections` param either way.
 
-**Legal-suffix stripping over-matches.** → Two genuinely different UK entities (`Foo Ltd`, `Foo PLC`) normalize alike. The ambiguity guard catches exactly this: appearing twice means granting to nobody.
+**Legal-suffix stripping over-matches.** → Two genuinely different UK entities (`Foo Ltd`, `Foo PLC`) normalize alike. The ambiguity guard catches this only when they are *different organisations* — it keys on the register's identity field (town / KvK), because the UK register lists one organisation once per route it holds and a bare repeated-name rule would delete exactly the companies holding several licences. Same name, same town collapses to one body and survives; same name, different towns grants to nobody. Spelling variants of one organisation therefore pass through, which is the intended outcome.
 
 **The register is a point-in-time snapshot.** → A licence revoked the day after publication still reads as valid until the next import. The badge names its issuing register so a user can verify independently, and the disclaimer copy does not overclaim.
 
@@ -102,6 +102,6 @@ No database migration. `companies.collections` and `jobs.collections` exist; `co
 
 ## Open Questions
 
-- **`hq_country` density in production.** Answered by step 2 of the migration plan; the answer determines whether the single-token rule ships as designed.
+- **`hq_country` density in production.** Partly answered ahead of the dry run: sampling 1,000 companies spread across the whole GB-hiring cohort found the column populated for ~61% and **every** populated value an ISO code (mixed case). The single-token rule therefore ships as designed, and the comparison now accepts spelled-out names as well, so it no longer depends on `cmd/backfill-company-info` continuing to receive ISO codes from its upstream. Step 2 of the migration plan still measures the real per-collection grant counts.
 - **Do two facet specs on one query param work?** Answered by reading `facets.ts` and the filter machinery during implementation. Presentation-only either way.
 - **Refresh cadence.** UK republishes monthly, NL continuously. `cmd/import-collections` runs on the existing collections schedule; whether the registers warrant their own cadence is deferred until the first month of drift is observed.

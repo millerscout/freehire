@@ -25,6 +25,12 @@
     )}
   >
     {badge.label}
-    <span class="opacity-70">{badge.issuer}</span>
+    <span aria-hidden="true" class="opacity-70">{badge.issuer}</span>
+    <!-- The disclaimer cannot live in `title` alone. There is no hover on a phone,
+         and a large share of job-search traffic is on one, so the qualifier would be
+         unreachable for exactly the readers most likely to act on the badge; screen
+         readers announce `title` inconsistently too. This carries the full sentence
+         into the accessible name and leaves the visual chip unchanged. -->
+    <span class="sr-only">— {badge.tooltip}</span>
   </span>
 {/each}

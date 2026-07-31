@@ -107,10 +107,18 @@ tagged on a guess.
 - **Geography gate.** The company SHALL have a geographic link to the register's
   country. For a normalized name of two or more tokens, the register's country
   present in the company's countries SHALL suffice.
-- **Single-token rule.** For a normalized name of exactly one token, the company's
-  headquarters country SHALL equal the register's country. A single-token name is
-  too weak a signal on its own: a multinational with a local office would otherwise
-  inherit a credential from an unrelated local business of the same name.
+- **Single-token rule.** For a name whose normalized slug is a single unpunctuated
+  token, the company's headquarters country SHALL denote the register's country. A
+  single-token name is too weak a signal on its own: a multinational with a local
+  office would otherwise inherit a credential from an unrelated local business of
+  the same name. A name that normalizes to several slug segments — including one
+  punctuated into segments, such as `Booking.com` or `Rolls-Royce` — is specific
+  enough to fall under the geography gate alone.
+- **Country comparison.** A stored country value SHALL be compared whole and
+  case-insensitively, and SHALL be recognised by its ISO code or by a spelled-out
+  name for the same country. The headquarters column has more than one writer and
+  not all of them normalize, so the guard SHALL NOT depend on a particular upstream
+  spelling; a substring SHALL NOT count as a match.
 - **Ambiguity guard.** A normalized name shared by more than one *organisation* in
   a register SHALL be treated as identifying none of them, and SHALL grant the
   credential to no company. Organisations SHALL be told apart by a register-specific
@@ -144,6 +152,19 @@ tagged on a guess.
 - **WHEN** a single-token register name matches a company that has open jobs in the
   register's country but whose headquarters country is elsewhere
 - **THEN** the company does not receive the credential
+
+#### Scenario: A spelled-out headquarters country is recognised
+
+- **WHEN** a single-token register name matches a company whose headquarters country
+  is stored as `United Kingdom` rather than `GB`
+- **THEN** the company receives the credential, the comparison having recognised the
+  name as denoting the same country
+
+#### Scenario: A country name is not matched by substring
+
+- **WHEN** a company's headquarters country is stored as a longer string that merely
+  contains a country name
+- **THEN** the guard does not treat it as a match
 
 #### Scenario: A single-token name is accepted with a matching headquarters
 

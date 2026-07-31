@@ -9,10 +9,14 @@
 // changes in the facet index.
 //
 // Idempotent: re-running with the same inputs writes the same membership and
-// changes nothing on the second pass. If any collection's source cannot be
-// resolved — a failed fetch, or a payload that parses to no records — the run
-// aborts before writing, because a partial resolve would otherwise drop that
-// collection's tags from every company.
+// changes nothing on the second pass.
+//
+// Three things abort the run before it writes, all guarding the same hazard — that
+// a broken source reconciles a tag off every company that holds it: a failed fetch
+// or resolve, a payload that parses to no records, and a tag that would lose most
+// of its current holders. The last covers the case the other two cannot see, where
+// an upstream relabelling leaves the row count intact but matches nobody; override
+// it with -force when the loss is genuinely correct.
 //
 // Run with -dry-run first when a gate or threshold has changed: it resolves,
 // matches, and gates exactly as a real run does, reports the outcome per
@@ -42,7 +46,12 @@ const fetchTimeout = 60 * time.Second
 
 // dryRun resolves, matches, and gates exactly as a real run does, reports what it
 // would write, and writes nothing.
-var dryRun = flag.Bool("dry-run", false, "resolve and match, report the outcome, write nothing")
+var (
+	dryRun = flag.Bool("dry-run", false, "resolve and match, report the outcome, write nothing")
+	// force overrides the collapse guard, for the rare run where a tag genuinely
+	// should lose most of its holders (retiring a collection, a real register purge).
+	force = flag.Bool("force", false, "write even when a tag would lose most of its holders")
+)
 
 func main() {
 	flag.Parse()
@@ -83,8 +92,23 @@ func run() int {
 	// is how that gets answered before it can do damage rather than after.
 	if *dryRun {
 		report(p, len(rows))
+		for _, c := range p.collapsed {
+			log.Printf("import-collections: WOULD COLLAPSE %s — %d holders, %d would survive", c.slug, c.had, c.keeps)
+		}
 		log.Printf("import-collections: dry run — %d companies would be updated, nothing written", len(p.writes))
 		return 0
+	}
+
+	// A tag losing most of its holders in one run is a broken source, not a change in
+	// the world. The fetch and empty-parse aborts cannot see this case: a register
+	// whose values were relabelled upstream still parses to its full row count, then
+	// matches nobody. Stop before writing and make a human confirm.
+	if len(p.collapsed) > 0 && !*force {
+		for _, c := range p.collapsed {
+			log.Printf("import-collections: %s would drop from %d holders to %d", c.slug, c.had, c.keeps)
+		}
+		log.Printf("import-collections: aborting before write — re-run with -dry-run to inspect, or -force if this is genuinely correct")
+		return 1
 	}
 
 	for _, w := range p.writes {
@@ -202,10 +226,28 @@ func slugRecords(slugs []string) []collections.Record {
 	return out
 }
 
+// collapseRatio is the share of a tag's holders that may be lost in one run before
+// the run is treated as a broken source rather than a genuine change. Membership
+// moves by a few percent between runs; half of it vanishing at once has never been
+// real data.
+const collapseRatio = 0.5
+
+// collapse is a managed tag about to lose most of the companies that hold it.
+type collapse struct {
+	slug       string
+	had, keeps int
+}
+
 // planResult is the computed membership change plus the per-collection match stats.
 type planResult struct {
 	writes []db.SetCompanyCollectionsParams
 	stats  map[string]collections.MatchStat
+	// collapsed lists tags losing at least collapseRatio of their holders in this
+	// run — the failure the fetch and empty-parse aborts cannot see. A source that
+	// parses fine but whose values have been relabelled upstream yields a full row
+	// count, matches nobody, and Reconcile then strips the tag from every company
+	// that held it, with no error and a zero exit.
+	collapsed []collapse
 	// withHQCountry counts companies with a known headquarters country, reported
 	// because the single-token credential rule is only as good as that column.
 	withHQCountry int
@@ -217,11 +259,6 @@ type planResult struct {
 // the companies whose set actually changes. It is pure — all I/O lives in run.
 // `resolved` maps a collection slug to its candidate company names/slugs.
 func plan(rows []db.ListCompanyCollectionsRow, resolved map[string][]collections.Record) planResult {
-	existing := make(map[string]struct{}, len(rows))
-	for _, r := range rows {
-		existing[r.Slug] = struct{}{}
-	}
-
 	companies := make(map[string]collections.Company, len(rows))
 	withHQCountry := 0
 	for _, r := range rows {
@@ -250,6 +287,8 @@ func plan(rows []db.ListCompanyCollectionsRow, resolved map[string][]collections
 		}
 	}
 
+	collapsed := detectCollapse(rows, want)
+
 	// Managed = live collection slugs plus retired ones, so Reconcile strips a
 	// renamed/removed collection's stale tags (no wanted members) as well as
 	// reconciling the current set.
@@ -262,7 +301,38 @@ func plan(rows []db.ListCompanyCollectionsRow, resolved map[string][]collections
 		}
 	}
 
-	return planResult{writes: writes, stats: stats, withHQCountry: withHQCountry}
+	return planResult{writes: writes, stats: stats, withHQCountry: withHQCountry, collapsed: collapsed}
+}
+
+// detectCollapse finds managed tags about to lose most of their holders. A tag
+// nobody currently holds cannot collapse — that is a new collection's first run,
+// not a broken source — and RetiredSlugs are skipped because losing every holder is
+// exactly what retiring one is for.
+func detectCollapse(rows []db.ListCompanyCollectionsRow, want map[string][]string) []collapse {
+	had := map[string]int{}
+	for _, r := range rows {
+		for _, tag := range r.Collections {
+			had[tag]++
+		}
+	}
+	keeps := map[string]int{}
+	for _, tags := range want {
+		for _, tag := range tags {
+			keeps[tag]++
+		}
+	}
+
+	var out []collapse
+	for _, c := range collections.All {
+		before := had[c.Slug]
+		if before == 0 {
+			continue
+		}
+		if after := keeps[c.Slug]; float64(before-after) >= collapseRatio*float64(before) {
+			out = append(out, collapse{slug: c.Slug, had: before, keeps: after})
+		}
+	}
+	return out
 }
 
 // normalizedCurrent sorts a copy of the stored collections so the change check

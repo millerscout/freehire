@@ -197,3 +197,48 @@ func TestDropAmbiguous_KeepsAnEmptyInputEmpty(t *testing.T) {
 		t.Errorf("DropAmbiguous(nil) = %+v, want empty", got)
 	}
 }
+
+func TestRequireCountry_AcceptsSpelledOutCountryNames(t *testing.T) {
+	// hq_country has two writers and only one of them normalizes: cmd/import-yc runs
+	// values through location.Parse, while cmd/backfill-company-info writes the
+	// upstream `country` field verbatim. Today that upstream happens to emit ISO
+	// codes, so a bare code comparison works — but the gate must not depend on a
+	// third party's formatting choice, because the failure is silent: a company
+	// simply never earns a credential it qualifies for.
+	gate := RequireCountry("GB")
+	for _, hq := range []string{"GB", "gb", "uk", "UK", "United Kingdom", "united kingdom", "Great Britain"} {
+		co := Company{Slug: "monzo", Countries: []string{"GB"}, HQCountry: hq}
+		if !gate(co, Record{Name: "MONZO LTD"}) {
+			t.Errorf("hq_country %q was not recognised as the UK", hq)
+		}
+	}
+	gate = RequireCountry("NL")
+	for _, hq := range []string{"NL", "nl", "Netherlands", "the netherlands"} {
+		co := Company{Slug: "adyen", Countries: []string{"NL"}, HQCountry: hq}
+		if !gate(co, Record{Name: "ADYEN N.V."}) {
+			t.Errorf("hq_country %q was not recognised as the Netherlands", hq)
+		}
+	}
+}
+
+func TestRequireCountry_StillRejectsAnotherCountry(t *testing.T) {
+	gate := RequireCountry("GB")
+	for _, hq := range []string{"US", "United States", "IE", "Ireland", ""} {
+		co := Company{Slug: "apple", Countries: []string{"GB", "US"}, HQCountry: hq}
+		if gate(co, Record{Name: "APPLE LTD"}) {
+			t.Errorf("hq_country %q was accepted as the UK", hq)
+		}
+	}
+}
+
+func TestRequireCountry_DoesNotMatchOnASubstring(t *testing.T) {
+	// "Great Britain" must not make every string containing "britain" a match, and a
+	// country facet value is compared whole, not by prefix.
+	gate := RequireCountry("GB")
+	for _, hq := range []string{"New Great Britain Holdings", "gbr-something", "ukraine"} {
+		co := Company{Slug: "x", Countries: []string{"GB"}, HQCountry: hq}
+		if gate(co, Record{Name: "X LTD"}) {
+			t.Errorf("hq_country %q matched by substring", hq)
+		}
+	}
+}
