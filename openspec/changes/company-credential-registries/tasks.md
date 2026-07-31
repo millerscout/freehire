@@ -19,11 +19,11 @@
 
 ## 4. Register sources
 
-- [ ] 4.1 Implement the GOV.UK URL resolver: Content API → `details.attachments` → select the CSV by title, with an HTML-scrape fallback; test the API path, the fallback on a non-200, the fallback on unparseable JSON, and an error when neither yields a URL
-- [ ] 4.2 Implement `ParseUKSponsors` over the register CSV (Organisation Name, Town/City, County, Type & Rating, Route) into records carrying route, town, and rating; test against a committed fixture
-- [ ] 4.3 Implement `ParseNLSponsors` over the IND register HTML table (`<th scope="row">` organisation, `<td>` KvK), decoding HTML entities and retaining the KvK as metadata; test against a committed fixture
-- [ ] 4.4 Test that a zero-record parse from either source returns an error rather than an empty slice
-- [ ] 4.5 Add the `uk-skilled-worker-sponsor` and `nl-recognised-sponsor` registry entries with their titles, descriptions, `KindCredential`, datasets, and gates
+- [x] 4.1 Implement the GOV.UK URL resolver: Content API → `details.attachments` → select the CSV by title, with an HTML-scrape fallback; test the API path, the fallback on a non-200, the fallback on unparseable JSON, and an error when neither yields a URL
+- [x] 4.2 Implement `ParseUKSponsors` over the register CSV (Organisation Name, Town/City, County, Type & Rating, Route) into records carrying route, town, and rating; test against a committed fixture
+- [x] 4.3 Implement `ParseNLSponsors` over the IND register HTML table (`<th scope="row">` organisation, `<td>` KvK), decoding HTML entities and retaining the KvK as metadata; test against a committed fixture
+- [x] 4.4 Test that a zero-record parse from either source returns an error rather than an empty slice
+- [x] 4.5 Add the `uk-skilled-worker-sponsor` and `nl-recognised-sponsor` registry entries with their titles, descriptions, `KindCredential`, datasets, and gates
 
 ## 5. Import worker
 

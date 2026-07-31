@@ -44,6 +44,11 @@ type Dataset struct {
 	Data       []byte
 	ResolveURL func(context.Context, *http.Client) (string, error)
 	Parse      func([]byte) ([]Record, error)
+	// IdentityKey names the Record.Meta field that tells two same-named
+	// organisations apart in this source — the UK register's town, the Dutch
+	// register's KvK number. Read by the import worker's ambiguity guard (see
+	// DropAmbiguous); empty when the source publishes no such field.
+	IdentityKey string
 }
 
 // Valid reports whether the dataset declares exactly one payload source. Declaring
@@ -206,6 +211,23 @@ var All = []Collection{
 		Description: "Open roles at AI-native companies building AI-first products and infrastructure — model and inference APIs, vector databases, and agent/dev tooling.",
 		Kind:        KindEditorial,
 		Slugs:       AINativeSlugs,
+	},
+	{
+		Slug:        "uk-skilled-worker-sponsor",
+		Title:       "Licensed UK sponsor",
+		Description: "Open roles at employers on the GOV.UK register of licensed sponsors for the Skilled Worker and related work routes. The licence belongs to the employer — it is not a commitment to sponsor any particular role.",
+		Kind:        KindCredential,
+		Dataset:     &Dataset{ResolveURL: ResolveUKSponsorCSV, Parse: ParseUKSponsors, IdentityKey: "town"},
+		Gate:        AllOf(RequireCountry("GB"), RequireRoute(ukWorkRoutes...)),
+	},
+	{
+		Slug:        "nl-recognised-sponsor",
+		Title:       "Licensed NL sponsor",
+		Description: "Open roles at employers on the IND public register of recognised sponsors for work and highly skilled migrants. The recognition belongs to the employer — it is not a commitment to sponsor any particular role.",
+		Kind:        KindCredential,
+		Dataset:     &Dataset{URL: nlSponsorURL, Parse: ParseNLSponsors, IdentityKey: "kvk"},
+		// No route gate: the IND register publishes recognition, not routes.
+		Gate: RequireCountry("NL"),
 	},
 }
 
@@ -476,6 +498,25 @@ func ParseTechstarsCSV(data []byte) ([]string, error) {
 // locates the column by header (not a fixed index, so an upstream column reorder
 // doesn't silently read the wrong field) and returns each non-empty value.
 func parseCSVColumn(data []byte, delim rune, colName string) ([]string, error) {
+	rows, err := csvColumns(data, delim, colName)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row[0] != "" {
+			names = append(names, row[0])
+		}
+	}
+	return names, nil
+}
+
+// csvColumns extracts the named columns from a CSV with the given delimiter,
+// returning one trimmed slice per data row in the order the columns were asked for.
+// Columns are located by header rather than by index, so an upstream reorder cannot
+// silently read the wrong field, and a missing column is an error rather than a
+// column of blanks.
+func csvColumns(data []byte, delim rune, colNames ...string) ([][]string, error) {
 	r := csv.NewReader(strings.NewReader(string(data)))
 	r.Comma = delim
 	r.FieldsPerRecord = -1 // tolerate ragged rows rather than aborting the whole parse
@@ -483,27 +524,34 @@ func parseCSVColumn(data []byte, delim rune, colName string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("collections: read csv header: %w", err)
 	}
-	col := -1
-	for i, h := range header {
-		if strings.EqualFold(strings.TrimSpace(h), colName) {
-			col = i
-			break
+
+	idx := make([]int, len(colNames))
+	for n, want := range colNames {
+		idx[n] = -1
+		for i, h := range header {
+			if strings.EqualFold(strings.TrimSpace(h), want) {
+				idx[n] = i
+				break
+			}
+		}
+		if idx[n] < 0 {
+			return nil, fmt.Errorf("collections: csv has no %q column", want)
 		}
 	}
-	if col < 0 {
-		return nil, fmt.Errorf("collections: csv has no %q column", colName)
-	}
+
 	rows, err := r.ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("collections: read csv: %w", err)
 	}
-	names := make([]string, 0, len(rows))
+	out := make([][]string, 0, len(rows))
 	for _, row := range rows {
-		if col < len(row) {
-			if name := strings.TrimSpace(row[col]); name != "" {
-				names = append(names, name)
+		vals := make([]string, len(idx))
+		for n, i := range idx {
+			if i < len(row) {
+				vals[n] = strings.TrimSpace(row[i])
 			}
 		}
+		out = append(out, vals)
 	}
-	return names, nil
+	return out, nil
 }

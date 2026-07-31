@@ -5,6 +5,61 @@ import (
 	"testing"
 )
 
+func TestRegistry_HasBothSponsorCredentials(t *testing.T) {
+	for _, slug := range []string{"uk-skilled-worker-sponsor", "nl-recognised-sponsor"} {
+		c, ok := Lookup(slug)
+		if !ok {
+			t.Errorf("registry missing %q", slug)
+			continue
+		}
+		if c.Kind != KindCredential {
+			t.Errorf("%s kind = %q, want %q", slug, c.Kind, KindCredential)
+		}
+		if c.Title == "" || c.Description == "" {
+			t.Errorf("%s missing display copy: %+v", slug, c)
+		}
+		if c.Dataset == nil || !c.Dataset.Valid() {
+			t.Errorf("%s has no single dataset source", slug)
+		}
+		if c.Gate == nil {
+			t.Errorf("%s has no gate — a credential must never tag on a bare name match", slug)
+		}
+	}
+}
+
+func TestUKSponsorEntry_GateRejectsATemporaryWorkerFarm(t *testing.T) {
+	c, ok := Lookup("uk-skilled-worker-sponsor")
+	if !ok {
+		t.Fatal("uk-skilled-worker-sponsor missing")
+	}
+	farm := Company{Slug: "green-fields-farm", Countries: []string{"GB"}, HQCountry: "GB"}
+	seasonal := Record{Name: "Green Fields Farm Ltd", Meta: map[string]string{"route": "Temporary Worker - Seasonal Worker"}}
+	if c.Admits(farm, seasonal) {
+		t.Error("a seasonal-worker licence earned the skilled-worker credential")
+	}
+	skilled := Record{Name: "Green Fields Farm Ltd", Meta: map[string]string{"route": "Skilled Worker"}}
+	if !c.Admits(farm, skilled) {
+		t.Error("a skilled-worker row was rejected")
+	}
+}
+
+func TestNLSponsorEntry_GateIsGeographyOnly(t *testing.T) {
+	c, ok := Lookup("nl-recognised-sponsor")
+	if !ok {
+		t.Fatal("nl-recognised-sponsor missing")
+	}
+	// The IND register publishes no route breakdown, so recognition plus presence is
+	// the whole test — but presence still has to hold.
+	adyen := Company{Slug: "adyen", Countries: []string{"NL"}, HQCountry: "NL"}
+	if !c.Admits(adyen, Record{Name: "Adyen N.V."}) {
+		t.Error("a Dutch-headquartered recognised sponsor was rejected")
+	}
+	elsewhere := Company{Slug: "adyen", Countries: []string{"US"}, HQCountry: "US"}
+	if c.Admits(elsewhere, Record{Name: "Adyen N.V."}) {
+		t.Error("a company with no Dutch presence earned the Dutch credential")
+	}
+}
+
 func TestRequireCountry_MultiTokenNameMatchesOnTheCountryFacet(t *testing.T) {
 	gate := RequireCountry("GB")
 	co := Company{Slug: "acme-robotics", Countries: []string{"GB", "US"}}
