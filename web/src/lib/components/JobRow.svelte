@@ -15,6 +15,7 @@
   import type { Job } from '$lib/types';
   import { Badge } from '$lib/ui';
   import { supersedesReality } from '$lib/ghost';
+  import CredentialBadge from './CredentialBadge.svelte';
   import GhostBadge from './GhostBadge.svelte';
   import RealityBadge from './RealityBadge.svelte';
   import { timeAgo } from '$lib/utils';
@@ -266,7 +267,7 @@
 
   <!-- Signal row: reality chip + the region/employment facets, grouped under the
        title as quiet outline chips so they read as metadata, not decoration. -->
-  {#if job.reality || tags.length > 0 || job.countries?.length}
+  {#if job.reality || tags.length > 0 || job.countries?.length || job.collections?.length}
     <div class="mt-2 flex flex-wrap items-center gap-1.5">
       <!-- evergreen_posting IS the reality verdict, so showing both chips states one
            fact twice, the second time louder. The ghost chip carries it inside its
@@ -279,6 +280,10 @@
       {#each tags as tag (tag)}
         <Badge variant="outline">{tag}</Badge>
       {/each}
+      <!-- Register-backed employer credentials (visa-sponsor licences). A fact about
+           the employer, so it sits with the metadata chips and carries its own
+           disclaimer rather than reading as a promise about this role. -->
+      <CredentialBadge collections={job.collections} />
       <!-- Eligible countries as an overlapping flag cluster. Display-only here: the
            whole card is a link, so the flags carry no nested filter links. -->
       {#if job.countries?.length}
