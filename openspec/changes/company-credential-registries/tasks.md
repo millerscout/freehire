@@ -1,9 +1,9 @@
 ## 1. Widen the collections registry contract
 
-- [ ] 1.1 Add `Kind` (`KindEditorial`, `KindCredential`) to `Collection` in `internal/collections`, defaulting every existing entry to editorial; test that the registry exposes a kind for each entry
-- [ ] 1.2 Introduce `Record{Name string; Meta map[string]string}` and change `Dataset.Parse` to `[]byte → ([]Record, error)`; adapt the eight existing parsers (`ParseYC`, `ParseTechstarsCSV`, `ParseEUStartups`, `ParseCompanyCSV`, `ParseSlugList`, and the rest) to return name-only records, keeping their existing tests green untouched
-- [ ] 1.3 Add optional `Gate func(Company, Record) bool` to `Collection`; test that `Gate == nil` tags every name-matched company exactly as before, and that a gate returning false leaves the company untagged
-- [ ] 1.4 Add optional `Dataset.ResolveURL func(context.Context, *http.Client) (string, error)`; test that exactly one of `URL`, `Data`, `ResolveURL` may be set and that a resolver's result is what gets fetched
+- [x] 1.1 Add `Kind` (`KindEditorial`, `KindCredential`) to `Collection` in `internal/collections`, defaulting every existing entry to editorial; test that the registry exposes a kind for each entry
+- [x] 1.2 Introduce `Record{Name string; Meta map[string]string}` and change the `Dataset.Parse` **field** to `[]byte → ([]Record, error)`; the five existing parsers (`ParseYC`, `ParseTechstarsCSV`, `ParseEUStartups`, `ParseCompanyCSV`, `ParseSlugList`) keep their `[]string` signatures and tests untouched, wrapped in the registry by a `names()` adapter
+- [x] 1.3 Add optional `Gate func(Company, Record) bool` to `Collection`; test that `Gate == nil` tags every name-matched company exactly as before, and that a gate returning false leaves the company untagged
+- [x] 1.4 Add optional `Dataset.ResolveURL func(context.Context, *http.Client) (string, error)`; test that exactly one of `URL`, `Data`, `ResolveURL` may be set and that a resolver's result is what gets fetched
 
 ## 2. Company-name normalization for registers
 

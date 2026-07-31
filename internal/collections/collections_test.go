@@ -1,6 +1,9 @@
 package collections
 
 import (
+	"context"
+	"errors"
+	"net/http"
 	"reflect"
 	"slices"
 	"testing"
@@ -169,6 +172,117 @@ func TestParseEUStartups_ExtractsNameField(t *testing.T) {
 	}
 }
 
+func TestNames_AdaptsANameParserToRecords(t *testing.T) {
+	got, err := names(func([]byte) ([]string, error) { return []string{"Acme", "Globex"}, nil })(nil)
+	if err != nil {
+		t.Fatalf("names adapter returned error: %v", err)
+	}
+	want := []Record{{Name: "Acme"}, {Name: "Globex"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("names adapter = %+v, want %+v", got, want)
+	}
+}
+
+func TestNames_PropagatesParserError(t *testing.T) {
+	_, err := names(func([]byte) ([]string, error) { return nil, errBoom })(nil)
+	if err == nil {
+		t.Error("names adapter swallowed the parser error")
+	}
+}
+
+func TestRecord_CarriesSourceMetadata(t *testing.T) {
+	r := Record{Name: "Acme Robotics Ltd", Meta: map[string]string{"route": "Skilled Worker"}}
+	if r.Meta["route"] != "Skilled Worker" {
+		t.Errorf("record metadata lost: %+v", r)
+	}
+}
+
+func TestGate_NilAdmitsEveryNameMatch(t *testing.T) {
+	c := Collection{Slug: "x", Kind: KindEditorial}
+	if !c.Admits(Company{Slug: "acme"}, Record{Name: "Acme"}) {
+		t.Error("a gateless collection rejected a name match")
+	}
+}
+
+func TestGate_DecidesWhenSet(t *testing.T) {
+	c := Collection{
+		Slug: "x",
+		Kind: KindCredential,
+		Gate: func(co Company, r Record) bool { return r.Meta["route"] == "Skilled Worker" },
+	}
+	if c.Admits(Company{Slug: "acme"}, Record{Meta: map[string]string{"route": "Skilled Worker"}}) != true {
+		t.Error("gate rejected a record it should admit")
+	}
+	if c.Admits(Company{Slug: "acme"}, Record{Meta: map[string]string{"route": "Seasonal Worker"}}) != false {
+		t.Error("gate admitted a record it should reject")
+	}
+}
+
+func TestCompany_CarriesTheAttributesAGateNeeds(t *testing.T) {
+	co := Company{Slug: "acme", Countries: []string{"GB", "US"}, HQCountry: "GB"}
+	if co.Slug != "acme" || co.HQCountry != "GB" || len(co.Countries) != 2 {
+		t.Errorf("company shape lost detail: %+v", co)
+	}
+}
+
+func TestDataset_SourceIsExactlyOneOfURLDataResolver(t *testing.T) {
+	cases := []struct {
+		name string
+		ds   Dataset
+		ok   bool
+	}{
+		{"url only", Dataset{URL: "https://x/y.json"}, true},
+		{"data only", Dataset{Data: []byte("x")}, true},
+		{"resolver only", Dataset{ResolveURL: func(context.Context, *http.Client) (string, error) { return "", nil }}, true},
+		{"none", Dataset{}, false},
+		{"url and data", Dataset{URL: "https://x", Data: []byte("x")}, false},
+		{"url and resolver", Dataset{URL: "https://x", ResolveURL: func(context.Context, *http.Client) (string, error) { return "", nil }}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.ds.Valid(); got != tc.ok {
+				t.Errorf("Valid() = %v, want %v", got, tc.ok)
+			}
+		})
+	}
+}
+
+func TestRegistry_EveryDatasetDeclaresExactlyOneSource(t *testing.T) {
+	for _, c := range All {
+		if c.Dataset != nil && !c.Dataset.Valid() {
+			t.Errorf("collection %q dataset declares no single source", c.Slug)
+		}
+	}
+}
+
+func TestRegistry_EveryEntryDeclaresAKind(t *testing.T) {
+	// The zero Kind is deliberately invalid: kind decides which filter group a tag
+	// renders in, so a forgotten one must fail here rather than silently defaulting.
+	for _, c := range All {
+		switch c.Kind {
+		case KindEditorial, KindCredential:
+		default:
+			t.Errorf("collection %q declares no valid kind (got %q)", c.Slug, c.Kind)
+		}
+	}
+}
+
+func TestRegistry_CuratedThemesAreEditorial(t *testing.T) {
+	for _, slug := range []string{
+		"yc", "techstars", "european", "ai", "mag7",
+		"bigtech", "unicorn", "fortune500", "eastern-roots", "ai-native",
+	} {
+		c, ok := Lookup(slug)
+		if !ok {
+			t.Errorf("registry missing %q", slug)
+			continue
+		}
+		if c.Kind != KindEditorial {
+			t.Errorf("collection %q kind = %q, want %q", slug, c.Kind, KindEditorial)
+		}
+	}
+}
+
 func TestRegistry_HasUnicorn(t *testing.T) {
 	c, ok := Lookup("unicorn")
 	if !ok || c.Dataset == nil {
@@ -236,18 +350,21 @@ func TestEasternRoots_EmbeddedDatasetResolves(t *testing.T) {
 	if len(c.Dataset.Data) == 0 {
 		t.Fatal("eastern-roots dataset has no embedded data")
 	}
-	names, err := c.Dataset.Parse(c.Dataset.Data)
+	records, err := c.Dataset.Parse(c.Dataset.Data)
 	if err != nil {
 		t.Fatalf("parse embedded eastern-roots: %v", err)
 	}
-	if len(names) < 50 {
-		t.Errorf("eastern-roots slugs = %d, want a substantial list", len(names))
+	if len(records) < 50 {
+		t.Errorf("eastern-roots slugs = %d, want a substantial list", len(records))
 	}
 	// The embedded slugs must be canonical (Match normalizes them, but a
 	// non-canonical entry signals a bad edit to the committed file).
-	for _, s := range names {
-		if got := normalize.Slug(s); got != s {
-			t.Errorf("non-canonical slug %q (normalizes to %q)", s, got)
+	for _, r := range records {
+		if got := normalize.Slug(r.Name); got != r.Name {
+			t.Errorf("non-canonical slug %q (normalizes to %q)", r.Name, got)
 		}
 	}
 }
+
+// errBoom is a sentinel for the adapter's error-propagation test.
+var errBoom = errors.New("boom")

@@ -20,9 +20,9 @@ func TestPlan(t *testing.T) {
 		{Slug: "nytimes", Collections: []string{}},              // matches nothing → no write
 		{Slug: "oldyc", Collections: []string{"yc"}},            // no longer matched → yc dropped
 	}
-	resolved := map[string][]string{
-		"yc":      {"Acme Startup", "Unknown Co"}, // "Acme Startup" → acme-startup; "Unknown Co" → none
-		"bigtech": collections.BigTechSlugs,
+	resolved := map[string][]collections.Record{
+		"yc":      slugRecords([]string{"Acme Startup", "Unknown Co"}), // "Acme Startup" → acme-startup; "Unknown Co" → none
+		"bigtech": slugRecords(collections.BigTechSlugs),
 		"unicorn": nil,
 	}
 
@@ -61,7 +61,7 @@ func TestPlan_PreservesUnmanagedTag(t *testing.T) {
 		{Slug: "google", Collections: []string{"custom"}},
 	}
 	// google gains bigtech from the hand list; no yc/unicorn candidates.
-	got := plan(rows, map[string][]string{"bigtech": collections.BigTechSlugs})
+	got := plan(rows, map[string][]collections.Record{"bigtech": slugRecords(collections.BigTechSlugs)})
 	if len(got.writes) != 1 {
 		t.Fatalf("writes = %d, want 1", len(got.writes))
 	}

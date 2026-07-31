@@ -93,33 +93,52 @@ func run() int {
 // for a hand list). A static-list collection resolves locally; a dataset
 // collection is fetched and parsed. Any resolution failure is returned (the caller
 // aborts rather than write a partial membership).
-func resolveAll(ctx context.Context) (map[string][]string, error) {
-	resolved := make(map[string][]string, len(collections.All))
+func resolveAll(ctx context.Context) (map[string][]collections.Record, error) {
+	resolved := make(map[string][]collections.Record, len(collections.All))
 	for _, c := range collections.All {
 		switch {
 		case c.Slugs != nil:
-			resolved[c.Slug] = c.Slugs
+			resolved[c.Slug] = slugRecords(c.Slugs)
 		case c.Dataset != nil:
 			var (
-				names []string
-				err   error
+				records []collections.Record
+				err     error
 			)
 			if len(c.Dataset.Data) > 0 {
 				// Embedded, in-repo dataset (e.g. eastern-roots): parse the bundled
 				// bytes directly, no network fetch.
-				names, err = c.Dataset.Parse(c.Dataset.Data)
+				records, err = c.Dataset.Parse(c.Dataset.Data)
 			} else {
-				names, err = fetchDataset(ctx, datasetURL(c), c.Dataset.Parse)
+				records, err = fetchDataset(ctx, datasetURL(c), c.Dataset.Parse)
 			}
 			if err != nil {
 				return nil, fmt.Errorf("resolve %q: %w", c.Slug, err)
 			}
-			resolved[c.Slug] = names
+			resolved[c.Slug] = records
 		default:
 			return nil, fmt.Errorf("collection %q has no membership source", c.Slug)
 		}
 	}
 	return resolved, nil
+}
+
+// slugRecords lifts a hand list of canonical company slugs into the record shape a
+// dataset yields, so both membership sources reach the matcher as one type.
+func slugRecords(slugs []string) []collections.Record {
+	out := make([]collections.Record, len(slugs))
+	for i, s := range slugs {
+		out[i] = collections.Record{Name: s}
+	}
+	return out
+}
+
+// recordNames projects a record list down to the names the matcher works on.
+func recordNames(records []collections.Record) []string {
+	out := make([]string, len(records))
+	for i, r := range records {
+		out[i] = r.Name
+	}
+	return out
 }
 
 // matchStat is the per-collection match outcome, logged at the end of a run.
@@ -142,7 +161,7 @@ type planResult struct {
 // company's managed tags (preserving any unmanaged ones), emitting a write only for
 // the companies whose set actually changes. It is pure — all I/O lives in run.
 // `resolved` maps a collection slug to its candidate company names/slugs.
-func plan(rows []db.ListCompanyCollectionsRow, resolved map[string][]string) planResult {
+func plan(rows []db.ListCompanyCollectionsRow, resolved map[string][]collections.Record) planResult {
 	existing := make(map[string]struct{}, len(rows))
 	for _, r := range rows {
 		existing[r.Slug] = struct{}{}
@@ -151,7 +170,7 @@ func plan(rows []db.ListCompanyCollectionsRow, resolved map[string][]string) pla
 	want := make(map[string][]string)
 	stats := make(map[string]matchStat, len(resolved))
 	for _, c := range collections.All {
-		matched, unmatched := collections.Match(resolved[c.Slug], existing)
+		matched, unmatched := collections.Match(recordNames(resolved[c.Slug]), existing)
 		s := matchStat{matched: len(matched), unmatched: len(unmatched)}
 		if c.Slugs != nil { // hand list: keep the unmatched entries for diagnostics
 			s.unmatchedNames = unmatched
@@ -198,7 +217,7 @@ func datasetURL(c collections.Collection) string {
 
 // fetchDataset downloads a dataset URL and runs its parser. The URLs are constants
 // we control (not user input), so a plain client is appropriate.
-func fetchDataset(ctx context.Context, url string, parse func([]byte) ([]string, error)) ([]string, error) {
+func fetchDataset(ctx context.Context, url string, parse func([]byte) ([]collections.Record, error)) ([]collections.Record, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
 
