@@ -46,6 +46,6 @@
 
 ## 8. Verify and ship
 
-- [ ] 8.1 `go build ./... && go vet ./... && go test ./...` green, and the web build and lint at their baseline
+- [x] 8.1 `go build ./... && go vet ./... && go test ./...` green, and the web build and lint at their baseline
 - [ ] 8.2 Run `-dry-run` against production; inspect `hq_country` coverage and the per-collection counts, and record the numbers in the change before any write
 - [ ] 8.3 Run the real import, then `make reindex` (never stacked with `reindex-companies`), and confirm the facet returns jobs for both credentials

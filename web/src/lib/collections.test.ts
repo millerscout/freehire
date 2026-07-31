@@ -66,7 +66,7 @@ describe('credential collections in the job-search facet', () => {
   });
 
   it('offers both sponsor credentials, grouped apart from editorial collections', () => {
-    const options = collectionFacets[0].options ?? [];
+    const options = collectionFacets[0]?.options ?? [];
     const credentials = options.filter((o) => o.group);
     expect(credentials.map((o) => o.value)).toEqual([
       'uk-skilled-worker-sponsor',
@@ -78,7 +78,7 @@ describe('credential collections in the job-search facet', () => {
   });
 
   it('keeps editorial collections ungrouped and ahead of the credentials', () => {
-    const options = collectionFacets[0].options ?? [];
+    const options = collectionFacets[0]?.options ?? [];
     const firstGrouped = options.findIndex((o) => o.group);
     expect(firstGrouped).toBeGreaterThan(0);
     expect(options.slice(0, firstGrouped).every((o) => !o.group)).toBe(true);

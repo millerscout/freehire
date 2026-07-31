@@ -43,7 +43,10 @@ const COPY: Record<string, { issuer: string; tooltip: string }> = {
 export function credentialBadges(collections: string[] | undefined | null): CredentialBadge[] {
   if (!collections?.length) return [];
   const held = new Set(collections);
-  return COLLECTIONS.filter((c) => c.kind === 'credential' && held.has(c.slug))
-    .filter((c) => c.slug in COPY)
-    .map((c) => ({ slug: c.slug, label: c.title, ...COPY[c.slug] }));
+  return COLLECTIONS.filter((c) => c.kind === 'credential' && held.has(c.slug)).flatMap((c) => {
+    // flatMap, not filter-then-map: only the lookup narrows COPY's index signature,
+    // so reading it once is what makes the result total rather than a cast.
+    const copy = COPY[c.slug];
+    return copy ? [{ slug: c.slug, label: c.title, issuer: copy.issuer, tooltip: copy.tooltip }] : [];
+  });
 }

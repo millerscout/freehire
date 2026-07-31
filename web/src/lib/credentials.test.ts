@@ -4,9 +4,10 @@ import { credentialBadges } from './credentials';
 
 describe('credentialBadges', () => {
   it('surfaces a credential tag as a badge naming its issuing register', () => {
-    const [badge] = credentialBadges(['uk-skilled-worker-sponsor']);
-    expect(badge.label).toBe('Licensed UK sponsor');
-    expect(badge.issuer).toBe('GOV.UK');
+    const badges = credentialBadges(['uk-skilled-worker-sponsor']);
+    expect(badges).toHaveLength(1);
+    expect(badges[0]?.label).toBe('Licensed UK sponsor');
+    expect(badges[0]?.issuer).toBe('GOV.UK');
   });
 
   it('always carries the disclaimer that the licence is the employer’s', () => {
