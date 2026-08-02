@@ -26,20 +26,20 @@
 
 ## 3. The ingest seam
 
-- [ ] 3.1 In `cmd/ingest/store.go`, extract the `qtx.UpsertJob` call in the private `save`
+- [x] 3.1 In `cmd/ingest/store.go`, extract the `qtx.UpsertJob` call in the private `save`
       behind a helper that tries `RefreshUnchangedJob` first (through `qtx`, INSIDE the existing
       transaction, so the refresh and the enrichment enqueue still commit together) and falls
       back on `pgx.ErrNoRows`. The cheap branch returns only four columns, so the helper needs an
       explicit return type rather than a `db.UpsertJobRow`: a synthesised partial `db.Job` would
       hand a later reader `""` for `Title` instead of failing. `Save` and `SaveWithApplyForm`
       both inherit it.
-- [ ] 3.2 Integration test: re-ingesting an identical posting reports neither inserted nor
+- [x] 3.2 Integration test: re-ingesting an identical posting reports neither inserted nor
       changed, issues no index push and no role-cluster lookup, and still records the company
       into the crawled-set and runs the enrichment enqueue.
-- [ ] 3.3 Integration test: re-ingesting a **closed** posting with identical content reopens
+- [x] 3.3 Integration test: re-ingesting a **closed** posting with identical content reopens
       it — `closed_at` and the close record cleared, strikes reset, `updated_at` stamped. This
       is the regression guard for the `closed_at IS NULL` predicate.
-- [ ] 3.4 Integration test: `SaveWithApplyForm` on an unchanged posting still writes the
+- [x] 3.4 Integration test: `SaveWithApplyForm` on an unchanged posting still writes the
       apply form.
 
 ## 4. `updated_at` means "content changed"
