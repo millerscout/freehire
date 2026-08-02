@@ -38,7 +38,8 @@ type disconnectModel struct {
 	release  chan struct{} // released once the test has cut or cancelled the connection
 	answered chan struct{} // closed when the second round runs — the turn survived
 
-	releaseOnce sync.Once
+	releaseOnce  sync.Once
+	answeredOnce sync.Once
 }
 
 // newDisconnectModel wires the model and guarantees it is let go at the end of the test. A
@@ -75,7 +76,9 @@ func (m *disconnectModel) Chat(_ context.Context, _ []llms.MessageContent, _ []l
 		// over an unassembled dependency.
 		return callReplyChoice("experience_search", `{"query":"anything"}`), nil
 	}
-	close(m.answered)
+	// Once, because a session may run more than one turn through this model and closing a
+	// closed channel panics.
+	m.answeredOnce.Do(func() { close(m.answered) })
 	return &llms.ContentChoice{Content: disconnectAnswer}, nil
 }
 

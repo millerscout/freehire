@@ -499,10 +499,10 @@ func (h *assistantHandlers) streamTurn(c *fiber.Ctx, sess assistant.Session, pro
 	// the writer so the session's slot is taken while the request can still be answered — a
 	// slot taken after the handler returned could not refuse anything.
 	ctx, cancel := context.WithCancel(context.Background())
-	slot, admitted := h.turns.admit(sess.ID, cancel)
-	if !admitted {
+	slot, waiter, err := h.turns.claim(sess.ID, cancel)
+	if err != nil {
 		cancel()
-		return fiber.NewError(fiber.StatusConflict, "this session is already running a turn")
+		return fiber.NewError(fiber.StatusConflict, err.Error())
 	}
 
 	c.Context().SetBodyStreamWriter(fasthttp.StreamWriter(func(w *bufio.Writer) {
@@ -518,6 +518,27 @@ func (h *assistantHandlers) streamTurn(c *fiber.Ctx, sess assistant.Session, pro
 		stream := newSSEStream(w, conn, sseWriteTimeout)
 
 		defer cancel()
+
+		// A message that arrived while the session was busy waits here rather than running
+		// beside the turn in flight — two turns of one tailoring session would edit one CV
+		// from two conversations that cannot see each other. The client is told it is
+		// waiting, because a stream that goes quiet for a minute is indistinguishable from
+		// one that broke.
+		if waiter != nil {
+			stream.event(string(assistant.EventQueued), assistant.Event{Kind: assistant.EventQueued})
+
+			waitCtx, giveUp := context.WithTimeout(ctx, turnQueueWait)
+			slot, err = waiter.enter(waitCtx, cancel)
+			giveUp()
+			if err != nil {
+				// The wait is over and this turn never started. Every stream owes its client
+				// one terminal event; without it the client waits for a turn that is not
+				// coming.
+				stream.event(string(assistant.EventResult),
+					assistant.Event{Kind: assistant.EventResult, StopReason: assistant.StopCancelled})
+				return
+			}
+		}
 		defer h.turns.release(sess.ID, slot)
 
 		stopHeartbeat := stream.keepalive(sseKeepalive)

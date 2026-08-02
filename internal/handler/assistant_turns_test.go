@@ -2,8 +2,10 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -12,22 +14,19 @@ func TestTurnRegistryAdmitsOneTurnPerSession(t *testing.T) {
 	var reg turnRegistry
 	session := uuid.New()
 
-	first, ok := reg.admit(session, func() {})
-	if !ok {
-		t.Fatal("the first turn of an idle session was refused")
-	}
-	if _, ok := reg.admit(session, func() {}); ok {
-		t.Fatal("a second turn was admitted beside the first; two turns would write one CV")
+	first, waiter, err := reg.claim(session, func() {})
+	if err != nil || first == nil || waiter != nil {
+		t.Fatalf("the first turn of an idle session did not get the slot: %v, %v, %v", first, waiter, err)
 	}
 
 	// Another session is another slot: the bound is per conversation, not global.
-	if _, ok := reg.admit(uuid.New(), func() {}); !ok {
-		t.Fatal("a different session was refused while this one ran")
+	if other, waiter, err := reg.claim(uuid.New(), func() {}); err != nil || other == nil || waiter != nil {
+		t.Fatalf("a different session was made to wait while this one ran: %v, %v, %v", other, waiter, err)
 	}
 
 	reg.release(session, first)
-	if _, ok := reg.admit(session, func() {}); !ok {
-		t.Fatal("the session stayed busy after its turn ended")
+	if again, waiter, err := reg.claim(session, func() {}); err != nil || again == nil || waiter != nil {
+		t.Fatalf("the session stayed busy after its turn ended: %v, %v, %v", again, waiter, err)
 	}
 }
 
@@ -37,7 +36,7 @@ func TestTurnRegistryForgetsAFinishedTurn(t *testing.T) {
 	var reg turnRegistry
 	session := uuid.New()
 
-	slot, _ := reg.admit(session, func() {})
+	slot, _, _ := reg.claim(session, func() {})
 	reg.release(session, slot)
 
 	if n := reg.len(); n != 0 {
@@ -50,7 +49,7 @@ func TestTurnRegistryCancelsTheTurnItHolds(t *testing.T) {
 	session := uuid.New()
 	ctx, cancel := context.WithCancel(context.Background())
 
-	slot, _ := reg.admit(session, cancel)
+	slot, _, _ := reg.claim(session, cancel)
 	if !reg.cancel(session) {
 		t.Fatal("cancelling a running turn reported nothing to cancel")
 	}
@@ -72,6 +71,91 @@ func TestTurnRegistryCancelIsHarmlessWhenIdle(t *testing.T) {
 	}
 }
 
+// A second message does not race the turn in flight — it waits for it. Racing would put two
+// turns of one tailoring session on one CV, each blind to the other's edits.
+func TestTurnRegistrySecondClaimWaitsForTheFirst(t *testing.T) {
+	var reg turnRegistry
+	session := uuid.New()
+
+	running, waiter, err := reg.claim(session, func() {})
+	if err != nil || running == nil || waiter != nil {
+		t.Fatalf("first claim = (%v, %v, %v), want the slot", running, waiter, err)
+	}
+
+	_, waiter, err = reg.claim(session, func() {})
+	if err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	if waiter == nil {
+		t.Fatal("the second claim took a slot beside the first instead of waiting for it")
+	}
+
+	entered := make(chan *turnSlot, 1)
+	go func() {
+		slot, err := waiter.enter(context.Background(), func() {})
+		if err != nil {
+			t.Errorf("enter: %v", err)
+		}
+		entered <- slot
+	}()
+
+	select {
+	case <-entered:
+		t.Fatal("the waiting turn started while the first was still running")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	reg.release(session, running)
+	select {
+	case slot := <-entered:
+		if slot == nil {
+			t.Fatal("the waiting turn was let in without a slot")
+		}
+		reg.release(session, slot)
+	case <-time.After(2 * time.Second):
+		t.Fatal("the waiting turn never started after the first ended")
+	}
+}
+
+// One waiter, not a queue. A queue a client can grow without limit is a way to hold the process
+// open, and the waiting message is a live request whose natural depth is one.
+func TestTurnRegistryRefusesASecondWaiter(t *testing.T) {
+	var reg turnRegistry
+	session := uuid.New()
+
+	running, _, _ := reg.claim(session, func() {})
+	if _, waiter, err := reg.claim(session, func() {}); err != nil || waiter == nil {
+		t.Fatalf("the first waiter was refused: %v", err)
+	}
+
+	if _, _, err := reg.claim(session, func() {}); !errors.Is(err, errTurnQueueFull) {
+		t.Fatalf("third claim err = %v, want errTurnQueueFull", err)
+	}
+	reg.release(session, running)
+}
+
+// A wait that outlives its patience gives its place back, or the session would look permanently
+// occupied to every later message.
+func TestTurnRegistryWaitGivesUpWithItsContext(t *testing.T) {
+	var reg turnRegistry
+	session := uuid.New()
+
+	running, _, _ := reg.claim(session, func() {})
+	_, waiter, _ := reg.claim(session, func() {})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := waiter.enter(ctx, func() {}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("enter err = %v, want the deadline", err)
+	}
+
+	// The place is free again: another message may now wait.
+	if _, waiter, err := reg.claim(session, func() {}); err != nil || waiter == nil {
+		t.Fatalf("the waiting place was not given back: %v, %v", waiter, err)
+	}
+	reg.release(session, running)
+}
+
 // The registry is reached from the stream writer's goroutine and from cancel requests at the
 // same time, so its map must never be touched unguarded.
 func TestTurnRegistryIsSafeUnderConcurrentUse(t *testing.T) {
@@ -87,7 +171,7 @@ func TestTurnRegistryIsSafeUnderConcurrentUse(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if slot, ok := reg.admit(session, func() {}); ok {
+				if slot, _, err := reg.claim(session, func() {}); err == nil && slot != nil {
 					reg.cancel(session)
 					reg.release(session, slot)
 				}

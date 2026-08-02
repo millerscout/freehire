@@ -32,11 +32,11 @@
 
 ## 5. One turn at a time within a session
 
-- [ ] 5.1 Failing test: a message arriving during a running turn waits for it and then runs as its own turn
-- [ ] 5.2 Make a second message wait on the running turn's completion channel, bounded by a timeout
-- [ ] 5.3 Failing test: a third message, arriving while one waits, is refused with 409 and disturbs neither the running nor the waiting turn
-- [ ] 5.4 Emit a `queued` event to the waiting client before its turn's own events
-- [ ] 5.5 Failing test: a queued message whose wait times out fails cleanly with a terminal event rather than hanging the client
+- [x] 5.1 Failing test: a message arriving during a running turn waits for it and then runs as its own turn
+- [x] 5.2 Make a second message wait on the running turn's completion channel, bounded by a timeout
+- [x] 5.3 Failing test: a third message, arriving while one waits, is refused with 409 and disturbs neither the running nor the waiting turn
+- [x] 5.4 Emit a `queued` event to the waiting client before its turn's own events
+- [x] 5.5 Failing test: a queued message whose wait times out fails cleanly with a terminal event rather than hanging the client
 
 ## 6. The client stops lying about interrupted turns
 
