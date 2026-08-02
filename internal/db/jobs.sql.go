@@ -2359,7 +2359,12 @@ SET last_seen_at = now(),
     -- A reopen resets the strike count so a single later expired probe can't immediately
     -- re-close it, mirroring UpsertJob.
     liveness_strikes = CASE WHEN closed_at IS NOT NULL THEN 0 ELSE liveness_strikes END,
-    updated_at   = now()
+    -- updated_at moves ONLY on a reopen. A re-listing that changed nothing is not a content
+    -- change, and stamping it would keep the column meaning "last crawled" — the same economy
+    -- RefreshUnchangedJob brings to the board path, applied to the hydrating one. A reopen IS a
+    -- change the search reconciler must see, so that case still stamps. The RHS reads the row's
+    -- pre-update closed_at, which is why one CASE serves both this and the strike reset above.
+    updated_at   = CASE WHEN closed_at IS NOT NULL THEN now() ELSE updated_at END
 WHERE source = $1 AND external_id = $2
 RETURNING company_slug
 `
@@ -2671,9 +2676,19 @@ company_upsert AS (
     INSERT INTO companies (slug, name)
     SELECT $6, $5
     WHERE $6 <> ''
+    -- The WHERE is what keeps a crawl from rewriting one company row once per posting. Without
+    -- it a board of 5,000 vacancies updated its company 5,000 times per pass: measured on prod
+    -- 2026-08-02, 286M updates against 305k rows, leaving that table 32% dead tuples at 26 KB
+    -- per live row. The guard sits on the UPDATE branch only, so a new company is still created.
+    -- companies.updated_at is also served as a hiring company's sitemap <lastmod>, so this stops
+    -- it claiming every company changed on every crawl.
+    --
+    -- Only this copy is guarded. The same CTE in UpsertManualJob and UpdateManualJob fires once
+    -- per moderator action, where the write costs nothing worth guarding.
     ON CONFLICT (slug) DO UPDATE SET
         name       = EXCLUDED.name,
         updated_at = now()
+    WHERE companies.name IS DISTINCT FROM EXCLUDED.name
 )
 INSERT INTO jobs (
     source, external_id, url, title, company, company_slug, location, remote, description, posted_at,

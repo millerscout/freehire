@@ -44,18 +44,18 @@
 
 ## 4. `updated_at` means "content changed"
 
-- [ ] 4.1 Change `TouchJob` (`jobs.sql`) to stamp `updated_at` only when it reopens:
+- [x] 4.1 Change `TouchJob` (`jobs.sql`) to stamp `updated_at` only when it reopens:
       `updated_at = CASE WHEN closed_at IS NOT NULL THEN now() ELSE updated_at END`.
       Run `make sqlc`.
-- [ ] 4.2 Integration test: `TouchJob` on an open row advances `last_seen_at` and leaves
+- [x] 4.2 Integration test: `TouchJob` on an open row advances `last_seen_at` and leaves
       `updated_at`; on a closed row it reopens and stamps `updated_at`.
 
 ## 5. The company row
 
-- [ ] 5.1 Guard the `company_upsert` CTE inside `UpsertJob` only with
+- [x] 5.1 Guard the `company_upsert` CTE inside `UpsertJob` only with
       `WHERE companies.name IS DISTINCT FROM EXCLUDED.name`. Leave the CTEs in
       `UpsertManualJob` and `UpdateManualJob` alone. Run `make sqlc`.
-- [ ] 5.2 Integration test: ingesting a posting for an existing company under an unchanged
+- [x] 5.2 Integration test: ingesting a posting for an existing company under an unchanged
       name leaves `companies.updated_at` untouched; a renamed company still updates both
       `name` and `updated_at`.
 
