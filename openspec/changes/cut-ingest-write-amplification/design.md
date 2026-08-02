@@ -81,18 +81,20 @@ trade than the lookup costs.
 
 `RoleFingerprint` reads `company_slug`, `title`, `description`; all three are inputs to
 `jobhash.Of`. Equal `content_hash` therefore implies equal `role_fingerprint`. The same
-argument covers the deterministic facets. This is an invariant between two functions that
-can drift, so it becomes a test in `internal/jobhash` rather than a comment — the package
-already has precedent for exactly this (`TestOfRow_CarriesEveryFieldTheHashReads` exists
-because the same mapping had already drifted once).
+argument covers the deterministic facets — with the dictionary caveat in the next section.
+This is an invariant between two functions that can drift, so it becomes a test in
+`internal/jobhash` rather than a comment — the package already has precedent for exactly
+this (`TestOfRow_CarriesEveryFieldTheHashReads` exists because the same mapping had already
+drifted once).
 
 ### A dictionary change no longer rides in on the next crawl
 
 `UpsertJobParams` carries 26 fields; `jobhash.Of` reads 19. Three derived columns the upsert
-writes are outside the fingerprint: `cities`, `is_tech`, `english_level`. Their *inputs*
-(`location`, `title`, `description`) are all hashed, so equal `content_hash` implies equal
-derived values — **given the same dictionary**. The dictionary is an implicit input the
-fingerprint cannot see.
+writes are outside the **content hash**: `cities`, `is_tech`, `english_level`. Their own
+inputs are all hashed — `cities` from `location`, `is_tech` from `category` and `title`,
+`english_level` from `description` — so equal `content_hash` implies equal derived values
+**given the same dictionary**. The dictionary is an implicit input the content hash cannot
+see.
 
 So a dictionary edit (a city added to the GeoNames set, a term added to the non-tech set)
 stops propagating to unchanged rows as a side effect of re-crawling them. This is a real
@@ -101,10 +103,16 @@ dictionary version in the hash would invalidate the whole catalogue on every dic
 edit, which is the opposite of what this change is for.
 
 The reconciler already exists and is the documented mechanism — `cmd/backfill-derive`
-re-derives exactly this set (`cities`, `is_tech`, `english_level`, `role_fingerprint`,
-slugs) in one keyset pass and already compares before writing, so it is cheap on a
-catalogue where little moved. What changes is that running it after a dictionary edit
-becomes required rather than merely faster than waiting.
+re-derives these three in one keyset pass, and already compares before writing, so it is
+cheap on a catalogue where little moved. What changes is that running it after a dictionary
+edit becomes required rather than merely faster than waiting.
+
+Read its own doc comment before making that routine: the pass re-derives **every**
+deterministic column, not only the three — all thirteen facets, the role fingerprint and
+both slugs — and in doing so overwrites structured-source facets an adapter supplied and
+blanks moderator-stated `regions`/`cities` on hand-authored rows. That blast radius is
+unchanged by this change, but promoting the command from occasional to routine makes it
+newly relevant.
 
 ### Only `UpsertJob`'s company CTE is guarded
 

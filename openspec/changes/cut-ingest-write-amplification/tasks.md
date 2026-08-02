@@ -1,8 +1,17 @@
 ## 1. Guard the invariant the whole change rests on
 
-- [ ] 1.1 Add a test in `internal/jobhash` asserting every input `RoleFingerprint` reads is
+- [x] 1.1 Add a test in `internal/jobhash` asserting every input `RoleFingerprint` reads is
       also an input `jobhash.Of` reads, so a fingerprint can never go stale behind a matching
       `content_hash`. Follow the shape of the existing `TestOfRow_CarriesEveryFieldTheHashReads`.
+- [ ] 1.2 The same guard for the deterministic facets, which the cheap path also skips: a test
+      asserting that if mutating a `jobderive.Input` field moves any `Derived` value, that field
+      is also a `jobhash.Of` input. Three `Input` fields are known not to be hashed — `Source`
+      and `ExternalID`, safe because `RefreshUnchangedJob` matches a row BY them so they cannot
+      move, and `Cities`, which is not safe. Carry the safe two as named, reasoned exemptions the
+      test states rather than a blanket allowance, and report what `Cities` turns out to be: if a
+      structured-source city list can change while every hashed field stays put, the cheap path
+      must not skip that row. Resolve it here — by hashing the field, or by narrowing the
+      predicate — rather than deferring it into the write path.
 
 ## 2. The cheap write
 
