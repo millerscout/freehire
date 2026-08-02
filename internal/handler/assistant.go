@@ -519,6 +519,13 @@ func (h *assistantHandlers) streamTurn(c *fiber.Ctx, sess assistant.Session, pro
 
 		defer cancel()
 
+		// The heartbeat starts BEFORE the queue wait, not after it: a queued message can wait
+		// up to a minute, and an idle connection is exactly what a proxy in front of us
+		// collects. Waiting in silence would lose the connection at roughly the same moment
+		// the wait was about to pay off.
+		stopHeartbeat := stream.keepalive(sseKeepalive)
+		defer stopHeartbeat()
+
 		// A message that arrived while the session was busy waits here rather than running
 		// beside the turn in flight — two turns of one tailoring session would edit one CV
 		// from two conversations that cannot see each other. The client is told it is
@@ -541,9 +548,7 @@ func (h *assistantHandlers) streamTurn(c *fiber.Ctx, sess assistant.Session, pro
 		}
 		defer h.turns.release(sess.ID, slot)
 
-		stopHeartbeat := stream.keepalive(sseKeepalive)
-
-		err := turnRunner.Run(ctx, sess, registry, system, prompt, turn, func(e assistant.Event) {
+		err = turnRunner.Run(ctx, sess, registry, system, prompt, turn, func(e assistant.Event) {
 			// A write that fails means THIS reader is not listening: a phone froze its tab,
 			// a tunnel dropped, a laptop slept. It does not mean the work should stop, and
 			// treating it that way threw away live runs — a tailoring pass lost its report
@@ -555,7 +560,6 @@ func (h *assistantHandlers) streamTurn(c *fiber.Ctx, sess assistant.Session, pro
 			// Stopping a turn is now something a caller ASKS for, through the cancel route.
 			stream.event(string(e.Kind), e)
 		})
-		stopHeartbeat()
 		if err != nil {
 			// The loop has already emitted its terminal error event; this is for us —
 			// and for Sentry, which would otherwise never learn of it: this handler

@@ -20,7 +20,7 @@
 - [x] 3.1 Failing test in `internal/handler`: with every SSE write failing from the first event, the turn is cut short today; assert it runs to its own end and its messages are persisted
 - [x] 3.2 Remove the `cancel()` call from the SSE event callback in `streamTurn`; a failed write stops writing only
 - [x] 3.3 Failing test: a turn whose reader vanished mid-run still reaches and stores its final tool call, mirroring the lost `tailor_report`
-- [ ] 3.4 Confirm the keep-alive goroutine and the write deadline still end with the turn and leak nothing when nobody reads
+- [x] 3.4 Confirm the keep-alive goroutine and the write deadline still end with the turn and leak nothing when nobody reads
 
 ## 4. Cancellation gets its own channel
 
@@ -48,8 +48,8 @@
 
 ## 7. Verification
 
-- [ ] 7.1 `go build ./... && go vet ./...` and `go test ./...`
-- [ ] 7.2 `go vet -tags=integration ./...` — the cheap guard against a changed signature breaking the tagged suite CI runs
-- [ ] 7.3 `go test -tags=integration ./internal/handler/` for the turn and tool tests
-- [ ] 7.4 `pnpm test`, `pnpm lint` and `pnpm check` in `web/`
+- [x] 7.1 `go build ./... && go vet ./...` and `go test ./...`
+- [x] 7.2 `go vet -tags=integration ./...` — the cheap guard against a changed signature breaking the tagged suite CI runs
+- [x] 7.3 `go test -tags=integration ./internal/handler/` for the turn and tool tests
+- [x] 7.4 `pnpm test`, `pnpm lint` and `pnpm check` in `web/`
 - [ ] 7.5 Drive the real flow: start an autopilot run, background the tab for a minute, return, and confirm the run finished and filed its report
