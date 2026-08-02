@@ -895,22 +895,19 @@
             </div>
           {/if}
 
-          <!-- Waiting behind another turn of this session. Distinct from working: nothing is
-               being spent yet, and the elapsed counter would be measuring someone else's turn. -->
-          {#if chat.queued}
+          <!-- One indicator, two states. Queued is not working: nothing is being spent yet, and
+               the elapsed counter would be timing somebody else's turn. -->
+          {#if chat.queued || turnActive}
             <div class="self-start inline-flex items-baseline gap-2 px-2 py-1 text-xs text-muted-foreground">
               <span class="star-glow font-mono text-[0.85rem] font-semibold">
                 {SPINNER_GLYPHS[spinnerIdx]}
               </span>
-              <span class="shimmer font-medium">Waiting for the current turn to finish…</span>
-            </div>
-          {:else if turnActive}
-            <div class="self-start inline-flex items-baseline gap-2 px-2 py-1 text-xs text-muted-foreground">
-              <span class="star-glow font-mono text-[0.85rem] font-semibold">
-                {SPINNER_GLYPHS[spinnerIdx]}
+              <span class="shimmer font-medium">
+                {chat.queued ? 'Waiting for the current turn to finish' : currentVerb}…
               </span>
-              <span class="shimmer font-medium">{currentVerb}…</span>
-              <span class="font-mono text-[0.7rem] text-muted-foreground/70">({elapsedSec}s)</span>
+              {#if !chat.queued}
+                <span class="font-mono text-[0.7rem] text-muted-foreground/70">({elapsedSec}s)</span>
+              {/if}
             </div>
           {/if}
         </div>
