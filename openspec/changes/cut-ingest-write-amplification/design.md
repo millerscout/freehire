@@ -21,8 +21,9 @@ Two facts constrain every option below:
 
 - An ingest pass over a board of unchanged postings writes one narrow, HOT-eligible `UPDATE`
   per row and nothing to `companies`.
-- `updated_at` comes to mean "content last changed", so `reindex --since` becomes genuinely
-  incremental.
+- `updated_at` comes to mean "content last changed" rather than "last crawled", which the
+  jobs sitemap's `<lastmod>` and the public wire field both serve, and which is the
+  precondition for any incremental reindex scoped by that column.
 - Every observable behaviour is preserved: the 48h unseen sweep, the reopen, the incremental
   index push, the dedup marking, the enrichment enqueue.
 
@@ -63,7 +64,8 @@ rather than a comment saying it need not.
 ### The unchanged test lives in SQL, not in Go
 
 `RefreshUnchangedJob` matches on `(source, external_id, content_hash, cities)` and returns
-the row, or nothing. The caller branches on `pgx.ErrNoRows`.
+four narrow columns, or nothing. The caller branches on `pgx.ErrNoRows` — which is also what
+a brand-new posting yields, and correctly so: both cases want the same statement.
 
 *Alternative considered:* read the stored hash into Go first, then choose a statement. That
 costs a guaranteed extra round trip on the hot path and opens a window between the read and
@@ -77,16 +79,32 @@ for the first cut; the seam stays available.
 The chosen form costs **one** statement on the common path, the same as today. Only the
 rarer changed path pays two.
 
-### The cheap branch returns the same row type
+### The cheap branch returns four columns, not the row
 
-The helper returns a `db.UpsertJobRow` either way, with `Inserted` and `Changed` false on
-the cheap branch. The remainder of `save` is then untouched: `clustersByRole` and
-`needsIndex` are already gated on exactly those two fields and already evaluate false for an
-unchanged row. The dedup lookup and the index push are therefore skipped by the logic that
-already exists, not by a new branch someone must keep in sync.
+The first shape tried was `RETURNING sqlc.embed(jobs)`, so the helper could hand `save` a
+`db.UpsertJobRow` on either branch and leave the rest of the function untouched. That is the
+tidier Go and the wrong database call: embedding the row detoasts the ~2.5 KB `description`
+and ships `semantic_embedding` back for every re-seen posting, which is read amplification
+added to the path built to remove write amplification — on the host whose disk is already the
+constraint.
 
-This is also why the apply-form write and the crawled-set record need no special handling —
-they sit after the seam and run on both branches, as they must.
+What `save` actually reads on this branch is four columns: `id` (the enrichment enqueue and
+the apply-form capture queue), `source` and `company_slug` (the crawled-set that scopes the
+post-run sweep), and `duplicate_of` (the index-push gate). The fuller row is only ever needed
+to BUILD a search document, and this branch never does — `needsIndex` is false by
+construction. `TouchJob`, the hydrating-source sibling, returns `company_slug` alone for
+exactly this reason.
+
+The cost is that `save` cannot treat both branches as one type. Synthesising a partial
+`db.Job` was rejected outright: a later reader touching `saved.Job.Title` on the cheap branch
+would silently get `""`. Task 3.1 therefore introduces an explicit return type whose zero
+values cannot be mistaken for data.
+
+What does stay uniform is the gating: `clustersByRole` and `needsIndex` are already keyed on
+`Inserted`/`Changed`, both false on the cheap branch, so the dedup lookup and the index push
+are skipped by logic that already exists rather than a new branch to keep in sync. The
+apply-form write and the crawled-set record sit after the seam and run on both branches, as
+they must.
 
 ### `closed_at IS NULL` is a correctness predicate, not an optimisation
 

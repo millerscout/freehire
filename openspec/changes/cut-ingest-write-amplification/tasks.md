@@ -27,9 +27,12 @@
 ## 3. The ingest seam
 
 - [ ] 3.1 In `cmd/ingest/store.go`, extract the `qtx.UpsertJob` call in the private `save`
-      behind a helper that tries `RefreshUnchangedJob` first and falls back on
-      `pgx.ErrNoRows`, returning a `db.UpsertJobRow` with `Inserted`/`Changed` false on the
-      cheap branch. `Save` and `SaveWithApplyForm` both inherit it.
+      behind a helper that tries `RefreshUnchangedJob` first (through `qtx`, INSIDE the existing
+      transaction, so the refresh and the enrichment enqueue still commit together) and falls
+      back on `pgx.ErrNoRows`. The cheap branch returns only four columns, so the helper needs an
+      explicit return type rather than a `db.UpsertJobRow`: a synthesised partial `db.Job` would
+      hand a later reader `""` for `Title` instead of failing. `Save` and `SaveWithApplyForm`
+      both inherit it.
 - [ ] 3.2 Integration test: re-ingesting an identical posting reports neither inserted nor
       changed, issues no index push and no role-cluster lookup, and still records the company
       into the crawled-set and runs the enrichment enqueue.
@@ -76,3 +79,6 @@
       `go vet -tags=integration ./...` and `go test -tags=integration ./internal/db/ ./cmd/ingest/`.
 - [ ] 8.2 Snapshot `pg_stat_user_tables` for `jobs` and `companies` on prod and record the
       numbers in the change before releasing, so the post-release comparison has a baseline.
+- [ ] 8.3 Confirm on prod (`\d jobs`) that no index covers `last_seen_at`. The whole HOT premise
+      rests on it, and git is not authoritative: `migrations/0043_jobs_user_fk_idx.sql` records
+      that its two indexes were applied by hand with `CREATE INDEX CONCURRENTLY`.

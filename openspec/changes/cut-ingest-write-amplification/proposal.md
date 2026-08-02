@@ -65,9 +65,11 @@ None. Three neighbouring specs were checked and none of their requirements move:
 - `migrations/` — one new file for the storage parameters, deployed on its own.
 - `internal/jobhash` — a test asserting every `RoleFingerprint` input is also a `jobhash.Of`
   input, so a future field cannot make the fingerprint go stale on the cheap path.
-- Downstream, unblocked rather than changed: `reindex --since` becomes genuinely
-  incremental, and `companies.updated_at` — read as sitemap `<lastmod>` — stops reporting
-  "just now" for every hiring company on every crawl.
+- Downstream, unblocked rather than changed: both `updated_at` columns stop reporting "just
+  now" on every crawl, so the jobs and companies sitemaps serve a `<lastmod>` that means
+  something, and `ListJobsUpdatedAfter` becomes viable for an incremental reindex. That query
+  is dormant today — no caller, and `cmd/reindex` has no `--since` flag despite its comment —
+  because a column stamped on every crawl selects the whole catalogue.
 - Out of scope, and dependent on this landing first: reclaiming the accreted ~43 GB with
   `pg_repack`, dropping the two ~1 GB indexes with near-zero scans, purging
   `semantic_embedding`, and tuning autovacuum workers.

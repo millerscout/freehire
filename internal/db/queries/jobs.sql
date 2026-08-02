@@ -296,9 +296,16 @@ RETURNING sqlc.embed(jobs),
 -- timestamp.
 --
 -- last_seen_at is the ONLY column written, and it is deliberately in no index, so the update is
--- heap-only and maintains none of them. updated_at is deliberately NOT stamped: it thereby comes
--- to mean "content last changed" rather than "last crawled", which is what makes `reindex
--- --since` incremental instead of degrading into a full swap after every crawl.
+-- heap-only and maintains none of them.
+--
+-- updated_at is deliberately NOT stamped, so the column comes to mean "content last changed"
+-- rather than "last crawled". Two live readers see that: the jobs sitemap serves it as <lastmod>
+-- (ListJobSitemapFreshest -> internal/handler/sitemap.go), where a timestamp that stopped
+-- claiming every posting changed on every crawl is the honest signal rather than the one search
+-- engines learn to discount; and jobview puts it on the public wire. It also makes
+-- ListJobsUpdatedAfter viable for the first time — that query is currently dormant (no caller,
+-- and cmd/reindex has no --since flag despite what its comment says), because a column stamped
+-- on every crawl selects the whole catalogue and answers nothing.
 --
 -- The match key is (content_hash, cities), not the hash alone. cities is the one column the
 -- upsert writes that jobhash.Of does not read — a caller's structured city list overrides the
@@ -314,6 +321,16 @@ RETURNING sqlc.embed(jobs),
 -- closed_at IS NULL is correctness, not economy. A closed posting that reappears with identical
 -- content must reach UpsertJob, which is what clears closed_at and resets the strike count.
 -- Refreshing its liveness here would leave it closed while the unseen sweep kept seeing it.
+--
+-- RETURNING is four narrow columns, NOT sqlc.embed(jobs), and that is the point rather than an
+-- economy: embedding the row would detoast the ~2.5KB description and ship semantic_embedding
+-- back for every re-seen posting, adding read amplification to the path built to remove write
+-- amplification. These four are everything the caller reads on this branch — the id for the
+-- enrichment enqueue and the apply-form capture queue, source and company_slug for the
+-- crawled-set that scopes the post-run sweep, and duplicate_of for the index-push gate. The
+-- fuller row is only ever needed to BUILD a search document, which by construction this branch
+-- never does. TouchJob, the hydrating-source sibling, returns company_slug alone for the same
+-- reason.
 UPDATE jobs
 SET last_seen_at = now()
 WHERE source = sqlc.arg(source)
@@ -321,7 +338,7 @@ WHERE source = sqlc.arg(source)
   AND content_hash = sqlc.arg(content_hash)
   AND cities = COALESCE(sqlc.arg(cities)::text[], '{}')
   AND closed_at IS NULL
-RETURNING sqlc.embed(jobs);
+RETURNING id, source, company_slug, duplicate_of;
 
 -- name: RoleClusterCount :one
 -- The job-reality repost/mass-posting counts for one role cluster: how many postings

@@ -1784,7 +1784,7 @@ WHERE source = $1
   AND content_hash = $3
   AND cities = COALESCE($4::text[], '{}')
   AND closed_at IS NULL
-RETURNING jobs.id, jobs.source, jobs.external_id, jobs.url, jobs.title, jobs.company, jobs.location, jobs.remote, jobs.description, jobs.posted_at, jobs.created_at, jobs.updated_at, jobs.company_slug, jobs.enrichment, jobs.enriched_at, jobs.enrichment_version, jobs.public_slug, jobs.last_seen_at, jobs.closed_at, jobs.countries, jobs.regions, jobs.work_mode, jobs.liveness_strikes, jobs.skills, jobs.seniority, jobs.category, jobs.created_by, jobs.updated_by, jobs.posting_language, jobs.employment_type, jobs.education_level, jobs.experience_years_min, jobs.collections, jobs.content_hash, jobs.english_level, jobs.cities, jobs.view_count, jobs.applied_count, jobs.role_fingerprint, jobs.semantic_embedded_model, jobs.semantic_embedded_hash, jobs.duplicate_of, jobs.is_tech, jobs.semantic_embedding, jobs.salary_min_manual, jobs.salary_max_manual, jobs.salary_currency_manual, jobs.salary_period_manual, jobs.upvote_count, jobs.downvote_count, jobs.ats_absent_at, jobs.closed_reason
+RETURNING id, source, company_slug, duplicate_of
 `
 
 type RefreshUnchangedJobParams struct {
@@ -1795,7 +1795,10 @@ type RefreshUnchangedJobParams struct {
 }
 
 type RefreshUnchangedJobRow struct {
-	Job Job `json:"job"`
+	ID          int64       `json:"id"`
+	Source      string      `json:"source"`
+	CompanySlug string      `json:"company_slug"`
+	DuplicateOf pgtype.Int8 `json:"duplicate_of"`
 }
 
 // The cheap half of the ingest write path, tried before UpsertJob: a crawl that re-sees a
@@ -1808,9 +1811,16 @@ type RefreshUnchangedJobRow struct {
 // timestamp.
 //
 // last_seen_at is the ONLY column written, and it is deliberately in no index, so the update is
-// heap-only and maintains none of them. updated_at is deliberately NOT stamped: it thereby comes
-// to mean "content last changed" rather than "last crawled", which is what makes `reindex
-// --since` incremental instead of degrading into a full swap after every crawl.
+// heap-only and maintains none of them.
+//
+// updated_at is deliberately NOT stamped, so the column comes to mean "content last changed"
+// rather than "last crawled". Two live readers see that: the jobs sitemap serves it as <lastmod>
+// (ListJobSitemapFreshest -> internal/handler/sitemap.go), where a timestamp that stopped
+// claiming every posting changed on every crawl is the honest signal rather than the one search
+// engines learn to discount; and jobview puts it on the public wire. It also makes
+// ListJobsUpdatedAfter viable for the first time — that query is currently dormant (no caller,
+// and cmd/reindex has no --since flag despite what its comment says), because a column stamped
+// on every crawl selects the whole catalogue and answers nothing.
 //
 // The match key is (content_hash, cities), not the hash alone. cities is the one column the
 // upsert writes that jobhash.Of does not read — a caller's structured city list overrides the
@@ -1826,6 +1836,16 @@ type RefreshUnchangedJobRow struct {
 // closed_at IS NULL is correctness, not economy. A closed posting that reappears with identical
 // content must reach UpsertJob, which is what clears closed_at and resets the strike count.
 // Refreshing its liveness here would leave it closed while the unseen sweep kept seeing it.
+//
+// RETURNING is four narrow columns, NOT sqlc.embed(jobs), and that is the point rather than an
+// economy: embedding the row would detoast the ~2.5KB description and ship semantic_embedding
+// back for every re-seen posting, adding read amplification to the path built to remove write
+// amplification. These four are everything the caller reads on this branch — the id for the
+// enrichment enqueue and the apply-form capture queue, source and company_slug for the
+// crawled-set that scopes the post-run sweep, and duplicate_of for the index-push gate. The
+// fuller row is only ever needed to BUILD a search document, which by construction this branch
+// never does. TouchJob, the hydrating-source sibling, returns company_slug alone for the same
+// reason.
 func (q *Queries) RefreshUnchangedJob(ctx context.Context, arg RefreshUnchangedJobParams) (RefreshUnchangedJobRow, error) {
 	row := q.db.QueryRow(ctx, refreshUnchangedJob,
 		arg.Source,
@@ -1835,58 +1855,10 @@ func (q *Queries) RefreshUnchangedJob(ctx context.Context, arg RefreshUnchangedJ
 	)
 	var i RefreshUnchangedJobRow
 	err := row.Scan(
-		&i.Job.ID,
-		&i.Job.Source,
-		&i.Job.ExternalID,
-		&i.Job.URL,
-		&i.Job.Title,
-		&i.Job.Company,
-		&i.Job.Location,
-		&i.Job.Remote,
-		&i.Job.Description,
-		&i.Job.PostedAt,
-		&i.Job.CreatedAt,
-		&i.Job.UpdatedAt,
-		&i.Job.CompanySlug,
-		&i.Job.Enrichment,
-		&i.Job.EnrichedAt,
-		&i.Job.EnrichmentVersion,
-		&i.Job.PublicSlug,
-		&i.Job.LastSeenAt,
-		&i.Job.ClosedAt,
-		&i.Job.Countries,
-		&i.Job.Regions,
-		&i.Job.WorkMode,
-		&i.Job.LivenessStrikes,
-		&i.Job.Skills,
-		&i.Job.Seniority,
-		&i.Job.Category,
-		&i.Job.CreatedBy,
-		&i.Job.UpdatedBy,
-		&i.Job.PostingLanguage,
-		&i.Job.EmploymentType,
-		&i.Job.EducationLevel,
-		&i.Job.ExperienceYearsMin,
-		&i.Job.Collections,
-		&i.Job.ContentHash,
-		&i.Job.EnglishLevel,
-		&i.Job.Cities,
-		&i.Job.ViewCount,
-		&i.Job.AppliedCount,
-		&i.Job.RoleFingerprint,
-		&i.Job.SemanticEmbeddedModel,
-		&i.Job.SemanticEmbeddedHash,
-		&i.Job.DuplicateOf,
-		&i.Job.IsTech,
-		&i.Job.SemanticEmbedding,
-		&i.Job.SalaryMinManual,
-		&i.Job.SalaryMaxManual,
-		&i.Job.SalaryCurrencyManual,
-		&i.Job.SalaryPeriodManual,
-		&i.Job.UpvoteCount,
-		&i.Job.DownvoteCount,
-		&i.Job.AtsAbsentAt,
-		&i.Job.ClosedReason,
+		&i.ID,
+		&i.Source,
+		&i.CompanySlug,
+		&i.DuplicateOf,
 	)
 	return i, err
 }

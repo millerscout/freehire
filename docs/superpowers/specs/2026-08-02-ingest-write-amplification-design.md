@@ -109,9 +109,13 @@ Three constraints, each load-bearing:
   the update is HOT-eligible and maintains no index. Every other column `UpsertJob` writes
   is provably equal already (see below) or is bookkeeping we specifically want to stop
   writing.
-- **`updated_at` is not stamped.** This is what makes `reindex --since` genuinely
-  incremental: today every row looks changed after every crawl, which is why `--since` has
-  been observed to degrade into a full swap.
+- **`updated_at` is not stamped.** The column comes to mean "content last changed" rather
+  than "last crawled". Two readers see it today: the jobs sitemap serves it as `<lastmod>`
+  (`internal/handler/sitemap.go`), where a timestamp that stops claiming every posting
+  changed on every crawl is the honest signal, and `jobview` puts it on the public wire. It
+  is also the precondition for an incremental reindex — `ListJobsUpdatedAfter` exists but is
+  dormant (no caller, and `cmd/reindex` has no `--since` flag, whatever the query's comment
+  says), because a column stamped on every crawl selects everything.
 - **`closed_at IS NULL` is required for correctness.** Without it, a closed posting that
   reappears on the board with identical content would have its liveness refreshed and stay
   closed. Falling through to `UpsertJob` is what reopens it.
