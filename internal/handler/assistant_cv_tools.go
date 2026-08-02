@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,31 @@ import (
 	"github.com/strelov1/freehire/internal/experience"
 	"github.com/strelov1/freehire/internal/matchanalysis"
 )
+
+// opBatch is an edit batch as it arrives from a model: either the array the schema asks for,
+// or a string holding that array. Models package it both ways, and the packaging is a guess
+// about the wire format that says nothing about the edit — refusing it spends a round of the
+// turn's budget and teaches the model nothing about the CV.
+//
+// What is inside is read by the same strict rules either way. The decoder is re-armed with
+// DisallowUnknownFields here because a custom unmarshaller receives the raw bytes and the
+// caller's strictness does not reach through it, and that strictness is load-bearing: an
+// undefined field silently dropped is how an agent once rewrote the wrong experience entry
+// while reading success back.
+type opBatch []cvedit.Op
+
+func (b *opBatch) UnmarshalJSON(data []byte) error {
+	if len(data) > 0 && data[0] == '"' {
+		var packed string
+		if err := json.Unmarshal(data, &packed); err != nil {
+			return err
+		}
+		data = []byte(packed)
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	return dec.Decode((*[]cvedit.Op)(b))
+}
 
 // assistantCVTools are the tools a CV-tailoring session gets on top of the shared
 // ones. They are bound to the session's own CV and vacancy: the ids are closed
@@ -302,8 +328,8 @@ func (h *assistantHandlers) cvEditTool(cvID uuid.UUID, batchID uuid.UUID) assist
 		},
 		Run: func(ctx context.Context, userID int64, raw json.RawMessage) (any, error) {
 			var in struct {
-				Ops  []cvedit.Op `json:"ops"`
-				Note string      `json:"note"`
+				Ops  opBatch `json:"ops"`
+				Note string  `json:"note"`
 			}
 			if err := assistant.DecodeArgs(raw, &in); err != nil {
 				return nil, err
@@ -360,7 +386,9 @@ func (g bankGate) Publishable(ctx context.Context, userID int64, evidenceID stri
 	}
 	atom, err := g.bank.GetAtom(ctx, id, userID)
 	if errors.Is(err, experience.ErrNotFound) {
-		return errors.New("no banked achievement with that id — take evidence_id from experience_search")
+		// Named, not "that id": a batch cites one per operation, so a bare refusal leaves the
+		// model guessing which of them to go back for.
+		return fmt.Errorf("no banked achievement with id %s — take evidence_id from experience_search", id)
 	}
 	if err != nil {
 		return err

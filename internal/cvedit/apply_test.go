@@ -1,6 +1,7 @@
 package cvedit
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -198,6 +199,56 @@ func TestApplyRefusesAnOperationItCannotCarryOut(t *testing.T) {
 				t.Fatal("a refused operation changed the state")
 			}
 		})
+	}
+}
+
+// A batch names its positions against the document it was written for. Removing an earlier
+// position first shifts every later one, so applying them front-to-back makes a batch of two
+// removals refuse itself — the failure the tailoring agent kept hitting on prod.
+func TestApplyRemovesTwoPositionsOfOneList(t *testing.T) {
+	before := sample()
+	before.Experience[0].Bullets = []string{"zero", "one", "two", "three", "four"}
+
+	after, inverse, err := Apply(before, []Op{
+		{Kind: OpRemove, Path: mustParse(t, "experience[0].bullets[3]")},
+		{Kind: OpRemove, Path: mustParse(t, "experience[0].bullets[4]")},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	want := []string{"zero", "one", "two"}
+	if !reflect.DeepEqual(after.Experience[0].Bullets, want) {
+		t.Fatalf("bullets = %q, want %q", after.Experience[0].Bullets, want)
+	}
+
+	undone, _, err := Apply(after, inverse)
+	if err != nil {
+		t.Fatalf("Apply(inverse): %v", err)
+	}
+	if !reflect.DeepEqual(before.Experience, undone.Experience) {
+		t.Fatalf("undo left %+v, want %+v", undone.Experience, before.Experience)
+	}
+}
+
+// Reordering removals forgives an address invalidated by the batch itself. An address the list
+// never held is a different thing and stays refused, whole batch and all.
+func TestApplyRefusesARemovalTheListNeverHeld(t *testing.T) {
+	before := sample()
+	before.Experience[0].Bullets = []string{"zero", "one", "two", "three", "four"}
+
+	after, _, err := Apply(before, []Op{
+		{Kind: OpRemove, Path: mustParse(t, "experience[0].bullets[3]")},
+		{Kind: OpRemove, Path: mustParse(t, "experience[0].bullets[9]")},
+	})
+	if err == nil {
+		t.Fatal("Apply succeeded, want a refusal")
+	}
+	if !errors.Is(err, ErrInvalidOp) {
+		t.Fatalf("err = %v, want ErrInvalidOp", err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("a refused batch changed the state")
 	}
 }
 

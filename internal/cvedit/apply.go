@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
+	"strconv"
+	"strings"
 )
 
 // OpKind is the closed set of things an edit can do. Four structural operations replace the
@@ -59,14 +62,76 @@ func Apply(state State, ops []Op) (State, []Op, error) {
 	}
 
 	inverse := make([]Op, 0, len(ops))
-	for i, op := range ops {
-		undo, err := applyOne(&working, op)
+	for _, i := range applyOrder(ops) {
+		undo, err := applyOne(&working, ops[i])
 		if err != nil {
 			return state, nil, fmt.Errorf("operation %d: %w", i+1, err)
 		}
 		inverse = append([]Op{undo}, inverse...)
 	}
 	return working, inverse, nil
+}
+
+// applyOrder is the order the batch runs in, as positions into ops. It differs from the order
+// the caller wrote in one case: a run of removals addressing the same list goes highest index
+// first.
+//
+// A batch names its positions against the document it was written for. Removing an earlier
+// position first shifts every later one out from under its own address, so a batch asking for
+// two positions of one list would refuse itself for a reason the caller never asked for.
+// Reordering is confined to consecutive removals of one list, so no operation ever crosses one
+// that might address what it reads or writes.
+//
+// Error messages keep the caller's own numbering: it is their batch, not this order, that they
+// can see.
+func applyOrder(ops []Op) []int {
+	order := make([]int, len(ops))
+	for i := range order {
+		order[i] = i
+	}
+	for start := 0; start < len(ops); {
+		list, _, ok := listAddress(ops[start])
+		if !ok {
+			start++
+			continue
+		}
+		end := start + 1
+		for end < len(ops) {
+			next, _, ok := listAddress(ops[end])
+			if !ok || next != list {
+				break
+			}
+			end++
+		}
+		run := order[start:end]
+		sort.SliceStable(run, func(a, b int) bool {
+			_, x, _ := listAddress(ops[run[a]])
+			_, y, _ := listAddress(ops[run[b]])
+			return x > y
+		})
+		start = end
+	}
+	return order
+}
+
+// listAddress splits a removal's path into the list it addresses and the position within it —
+// `experience[0].bullets[3]` becomes `experience[0].bullets` and 3. It reports false for
+// anything that is not a removal from a position, which is what excludes every other operation
+// from reordering.
+func listAddress(op Op) (string, int, bool) {
+	if op.Kind != OpRemove {
+		return "", 0, false
+	}
+	s := string(op.Path)
+	open := strings.LastIndexByte(s, '[')
+	if open < 0 || !strings.HasSuffix(s, "]") {
+		return "", 0, false
+	}
+	at, err := strconv.Atoi(s[open+1 : len(s)-1])
+	if err != nil {
+		return "", 0, false
+	}
+	return s[:open], at, true
 }
 
 func applyOne(state *State, op Op) (Op, error) {
