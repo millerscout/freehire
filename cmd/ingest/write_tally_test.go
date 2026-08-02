@@ -55,8 +55,9 @@ func TestWriteTallySummary(t *testing.T) {
 	}
 }
 
-// A nil tally is what a Store built without one holds; recording into it must be a no-op
-// rather than a panic, matching how crawledSet is treated on the same path.
+// A nil tally is what a Store built without one holds — every test that does not care about
+// the share. Recording into it must be a no-op rather than a panic, so no call site needs a
+// guard of its own.
 func TestWriteTallyNilIsInert(t *testing.T) {
 	var w *writeTally
 	w.record("greenhouse", true)

@@ -140,6 +140,10 @@ func needsIndex(w written) bool {
 	return w.changed || w.inserted
 }
 
+// tookCheapWrite reports which of the two writes produced this. The narrow write is the only
+// one that carries no row, so this is exact rather than a heuristic.
+func (w written) tookCheapWrite() bool { return w.row == nil }
+
 // clustersByRole reports whether a persisted write is worth asking the role-cluster
 // question about — the gate in front of jobdedup.CanonicalForRole.
 //
@@ -156,10 +160,6 @@ func needsIndex(w written) bool {
 // rarer than the fan-out, and no worse off than before this existed.
 //
 // A row that already carries a marker knows its own answer and is not re-asked.
-// tookCheapWrite reports which of the two writes produced this. The narrow write is the only
-// one that carries no row, so this is exact rather than a heuristic.
-func (w written) tookCheapWrite() bool { return w.row == nil }
-
 func clustersByRole(w written) bool {
 	return w.inserted && !w.duplicateOf.Valid
 }
@@ -412,5 +412,11 @@ func (s *dbStore) Touch(ctx context.Context, source, externalID string) error {
 	if s.crawled != nil {
 		s.crawled.record(source, companySlug)
 	}
+	// A touch IS the cheap write for a hydrating source: TouchJob refreshes liveness and writes
+	// no content, the same bargain RefreshUnchangedJob makes on the board path. Counting it keeps
+	// the per-provider share meaning one thing for both source shapes. Leaving it out would be
+	// worse than a gap — a hydrating provider re-lists through here and only NEW offers reach
+	// save(), so the run would report 0% and read as the very churn the line exists to expose.
+	s.tally.record(source, true)
 	return nil
 }

@@ -28,8 +28,10 @@
 -- ADD CONSTRAINT ... CHECK HOLDS the lock across a full scan, which lock_timeout cannot help
 -- with. Copying that shape here would be cargo cult.
 --
--- Deploy this on its own rather than batched with other migrations, so a lock_timeout abort
--- costs a retry of one statement and nothing else.
+-- Applied to a fresh volume by initdb after 0072; on an existing prod volume run this manually
+-- (SET ROLE hire), on its own rather than batched with other migrations, so a lock_timeout abort
+-- costs a retry of one statement and nothing else. It may run before or after the code deploy —
+-- nothing reads these parameters, they only change how Postgres stores and vacuums the table.
 
 ALTER TABLE public.jobs SET (
     fillfactor = 90,

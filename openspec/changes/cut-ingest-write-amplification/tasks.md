@@ -62,8 +62,12 @@
 ## 6. Make the reach observable
 
 - [x] 6.1 Count cheap-path versus full-path writes per ingest run and log the pair once at
-      run end, attributed to the provider. Wire the counter through the existing run summary
-      rather than adding a parallel reporting path.
+      run end, attributed to the provider. DEVIATION, deliberate: this does NOT go through
+      `pipeline.RunStats`. The Runner only ever sees `error` back from `Store.Save`, so it cannot
+      learn which write ran without changing the Store interface. `writeTally` instead mirrors
+      `crawledSet` — the collector already established on this exact path for the same reason —
+      and emits its own line beside the run summary. The hydrating `Touch` path is counted too:
+      it IS the cheap write for those providers, and omitting it would report a false 0%.
 - [x] 6.2 Test: a run that re-saw only unchanged postings reports a full cheap-path share; a
       run whose postings all changed reports zero, rather than reporting nothing.
 

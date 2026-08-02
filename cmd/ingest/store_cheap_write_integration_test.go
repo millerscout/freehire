@@ -203,3 +203,25 @@ func TestSaveWithApplyForm_UnchangedRecrawlStillWritesTheForm(t *testing.T) {
 			"onto the full upsert", j.UpdatedAt.Time, before.UpdatedAt.Time)
 	}
 }
+
+// A hydrating source re-lists an offer through Touch, not Save — and Touch is that source's
+// cheap write, refreshing liveness without rewriting content. It has to be counted, or every
+// hydrating provider reports a 0% cheap share and reads as the exact churn the run-end line
+// exists to expose: a false alarm produced by construction, on nine providers.
+func TestTouch_CountsAsACheapWrite(t *testing.T) {
+	pool := testdb.Pool(t)
+	ctx := context.Background()
+	tally := newWriteTally()
+	store := newDBStore(pool, 1, nil, newCrawledSet(), tally)
+
+	if err := store.Save(ctx, cheapPosting("acme:cheap-4", "Site Engineer")); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := store.Touch(ctx, "lever", "acme:cheap-4"); err != nil {
+		t.Fatalf("Touch: %v", err)
+	}
+
+	if got, want := tally.summary(), "lever cheap=1/2 (50%)"; got != want {
+		t.Errorf("tally = %q, want %q — the touch is a cheap write and must be counted", got, want)
+	}
+}

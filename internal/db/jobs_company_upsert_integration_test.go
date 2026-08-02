@@ -28,8 +28,9 @@ func companyStamp(t *testing.T, pool *pgxpool.Pool, slug string) (string, time.T
 	return name, updated
 }
 
-// changedPosting is a re-crawl whose content DID move, so it takes the full upsert. The company
-// guard has to be exercised there: an unchanged posting no longer reaches UpsertJob at all.
+// changedPosting is a re-crawl whose content DID move. These tests call UpsertJob directly, so
+// the varying hash is not needed to reach it — it mirrors what the ingest path now sends here,
+// since an unchanged posting takes the cheap write and never arrives.
 func changedPosting(externalID, title, company, hash string) UpsertJobParams {
 	p := ingestParams(externalID, title)
 	p.Company = company
