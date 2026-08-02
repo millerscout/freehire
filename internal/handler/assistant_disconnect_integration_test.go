@@ -42,9 +42,14 @@ type disconnectModel struct {
 	answeredOnce sync.Once
 }
 
-// newDisconnectModel wires the model and guarantees it is let go at the end of the test. A
-// model left blocked on release holds the turn's goroutine, and the app's shutdown waits on it
-// — so a failing assertion would hang the whole package instead of reporting itself.
+// newDisconnectModel wires the model and guarantees it is let go at the end of the test.
+//
+// A model left blocked on release holds the turn's goroutine, and fiber's Shutdown waits on the
+// connection that goroutine is writing to, with no deadline — so a failing assertion would hang
+// the whole package instead of reporting itself. t.Cleanup alone does NOT prevent that: cleanups
+// run last-in-first-out, and serveOnSocket registers Shutdown after this, so Shutdown would run
+// first and wait forever. Each test therefore also defers letGo, which runs before any cleanup;
+// this registration is the backstop for a test that forgets.
 func newDisconnectModel(t *testing.T) *disconnectModel {
 	t.Helper()
 	m := &disconnectModel{
@@ -159,6 +164,7 @@ func TestTurnSurvivesAClientThatStopsReading(t *testing.T) {
 	pool := startPostgres(t)
 	iss := auth.NewIssuer("test-secret", time.Hour)
 	model := newDisconnectModel(t)
+	defer model.letGo()
 	app, _ := newAssistantApp(pool, iss, model)
 	_, cookie := assistantUser(t, pool, iss, "disconnect@example.test", true)
 	id := createSession(t, app, cookie)

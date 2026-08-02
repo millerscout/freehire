@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 
 	"github.com/strelov1/freehire/internal/auth"
 )
@@ -43,6 +44,7 @@ func TestASecondMessageWaitsForTheTurnInFlight(t *testing.T) {
 	pool := startPostgres(t)
 	iss := auth.NewIssuer("test-secret", time.Hour)
 	model := newDisconnectModel(t)
+	defer model.letGo()
 	app, _ := newAssistantApp(pool, iss, model)
 	_, cookie := assistantUser(t, pool, iss, "queue@example.test", true)
 	id := createSession(t, app, cookie)
@@ -73,4 +75,43 @@ func TestASecondMessageWaitsForTheTurnInFlight(t *testing.T) {
 	model.letGo()
 	<-running
 	awaitEvent(t, queued, "event: result")
+}
+
+// A wait that runs out still owes its client a terminal event — a client that receives none
+// waits forever — and must not leave the session looking occupied.
+func TestAQueuedMessageThatWaitsTooLongEndsCleanly(t *testing.T) {
+	pool := startPostgres(t)
+	iss := auth.NewIssuer("test-secret", time.Hour)
+	model := newDisconnectModel(t)
+	defer model.letGo()
+	app, handlers := newAssistantApp(pool, iss, model)
+	_, cookie := assistantUser(t, pool, iss, "queue-timeout@example.test", true)
+	id := createSession(t, app, cookie)
+	addr := serveOnSocket(t, app)
+
+	previous := turnQueueWait
+	turnQueueWait = 300 * time.Millisecond
+	t.Cleanup(func() { turnQueueWait = previous })
+
+	running := startTurnInBackground(t, addr, id, cookie)
+	select {
+	case <-model.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first turn never started")
+	}
+
+	queued := dialTurn(t, addr, id, cookie)
+	defer func() { _ = queued.Close() }()
+	awaitEvent(t, queued, "event: queued")
+	// The wait runs out while the turn ahead is still held: the client is told, rather than
+	// left on a stream that says nothing more.
+	awaitEvent(t, queued, "event: result")
+
+	// And the waiting place is given back, so the session is not left refusing every later
+	// message.
+	if _, waiter, err := handlers.turns.claim(uuid.New(), func() {}); err != nil || waiter != nil {
+		t.Fatalf("an unrelated session could not claim a slot: %v, %v", waiter, err)
+	}
+	model.letGo()
+	<-running
 }

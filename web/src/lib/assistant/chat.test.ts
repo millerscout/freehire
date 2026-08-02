@@ -164,4 +164,13 @@ describe('reduceTurnEvent', () => {
     s = reduceTurnEvent(s, { type: 'user_prompt', text: 'and another thing' });
     expect(s.queued).toBe(false);
   });
+
+  // A wait can end without the turn ever starting: it timed out, or the user stopped it. The
+  // terminal event has to clear the wait, or the view keeps claiming it is queued behind a turn
+  // that ended — and that stale banner then masks the next turn's real progress.
+  it('stops waiting when the turn ends without ever starting', () => {
+    let s = reduceTurnEvent(initChat(), { type: 'queued' });
+    s = reduceTurnEvent(s, { type: 'result', stop_reason: 'cancelled' });
+    expect(s.queued).toBe(false);
+  });
 });

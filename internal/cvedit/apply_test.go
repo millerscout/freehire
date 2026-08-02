@@ -209,10 +209,10 @@ func TestApplyRemovesTwoPositionsOfOneList(t *testing.T) {
 	before := sample()
 	before.Experience[0].Bullets = []string{"zero", "one", "two", "three", "four"}
 
-	after, inverse, err := Apply(before, []Op{
+	after, inverse, err := Apply(before, OrderAgainstOriginal([]Op{
 		{Kind: OpRemove, Path: mustParse(t, "experience[0].bullets[3]")},
 		{Kind: OpRemove, Path: mustParse(t, "experience[0].bullets[4]")},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -237,10 +237,10 @@ func TestApplyRefusesARemovalTheListNeverHeld(t *testing.T) {
 	before := sample()
 	before.Experience[0].Bullets = []string{"zero", "one", "two", "three", "four"}
 
-	after, _, err := Apply(before, []Op{
+	after, _, err := Apply(before, OrderAgainstOriginal([]Op{
 		{Kind: OpRemove, Path: mustParse(t, "experience[0].bullets[3]")},
 		{Kind: OpRemove, Path: mustParse(t, "experience[0].bullets[9]")},
-	})
+	}))
 	if err == nil {
 		t.Fatal("Apply succeeded, want a refusal")
 	}
@@ -271,5 +271,51 @@ func TestApplyInversesUndoInReverseOrder(t *testing.T) {
 	}
 	if !reflect.DeepEqual(before.Experience, undone.Experience) {
 		t.Fatalf("undo out of order: %+v, want %+v", undone.Experience, before.Experience)
+	}
+}
+
+// Diff states its indices against the list AS THE BATCH CHANGES IT, so its removals must be
+// applied in the order it wrote them. This is the everyday save path — the editor ships a whole
+// document and Diff turns it into operations — and the property it rests on is that applying
+// Diff(a, b) to a produces b exactly.
+func TestDiffOfTwoDeletionsRoundTrips(t *testing.T) {
+	before := sample()
+	before.Experience[0].Bullets = []string{"A", "B", "C", "D"}
+
+	after := sample()
+	after.Experience[0].Bullets = []string{"A", "C"}
+
+	ops := Diff(before, after)
+	got, _, err := Apply(before, ops)
+	if err != nil {
+		t.Fatalf("Apply(Diff): %v", err)
+	}
+	if !reflect.DeepEqual(got.Experience[0].Bullets, after.Experience[0].Bullets) {
+		t.Fatalf("bullets = %q, want %q — the user's own deletion removed the wrong line",
+			got.Experience[0].Bullets, after.Experience[0].Bullets)
+	}
+}
+
+// Undo replays the inverses Apply produced, and those are sequential too: an insert's inverse
+// is a removal at the position the insert used. Reordering them turned "undo the run" into
+// removing the candidate's own line while leaving the agent's insertion in place.
+func TestUndoOfTwoInsertsRestoresTheOriginal(t *testing.T) {
+	before := sample()
+	before.Experience[0].Bullets = []string{"A", "B", "C", "D"}
+
+	ops := []Op{
+		{Kind: OpInsert, Path: mustParse(t, "experience[0].bullets[3]"), Value: "X"},
+		{Kind: OpInsert, Path: mustParse(t, "experience[0].bullets[1]"), Value: "Y"},
+	}
+	after, inverse, err := Apply(before, ops)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	undone, _, err := Apply(after, inverse)
+	if err != nil {
+		t.Fatalf("Apply(inverse): %v", err)
+	}
+	if !reflect.DeepEqual(undone.Experience[0].Bullets, before.Experience[0].Bullets) {
+		t.Fatalf("undo left %q, want %q", undone.Experience[0].Bullets, before.Experience[0].Bullets)
 	}
 }

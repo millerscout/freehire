@@ -439,8 +439,8 @@ type assistantTurnRequest struct {
 // PostAssistantMessage runs one turn and streams it as SSE. Every frame the loop
 // produces — the recorded prompt, answer and reasoning deltas, each tool call and
 // its result, the token usage, and exactly one terminal result — is written as a
-// named event. A write failure means the client is gone, which cancels the turn's
-// context so the loop stops before spending another model call.
+// named event. A write failure means only that this reader stopped reading: the turn runs to
+// its own end regardless, and stopping it is a separate request (see CancelAssistantTurn).
 func (h *assistantHandlers) PostAssistantMessage(c *fiber.Ctx) error {
 	sess, err := h.ownedSession(c)
 	if err != nil {
@@ -465,7 +465,7 @@ func (h *assistantHandlers) PostAssistantMessage(c *fiber.Ctx) error {
 
 // streamTurn runs one turn and writes it to the response as SSE. It is shared by every
 // entry point that starts a turn, so the stream's shape — the headers, the cleared write
-// deadline, the keepalive, the cancellation on a dead client — is written once.
+// deadline and the keepalive — is written once.
 //
 // The prompt and the turn's bounds are the caller's arguments rather than the request's
 // body: an unattended run's brief and its raised ceiling are ours to choose, and a ceiling

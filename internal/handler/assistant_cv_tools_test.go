@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -325,6 +326,36 @@ func TestCVEditToolStillRefusesAnUnknownField(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "skill") {
 		t.Errorf("error = %v, want it to name the offending field", err)
+	}
+}
+
+// The model names positions against the document it read, so a batch removing two lines of one
+// list must mean what it says. The conversion lives at this boundary and nowhere deeper: the
+// editor's other callers state their indices sequentially.
+func TestCVEditToolRemovesTwoPositionsOfOneList(t *testing.T) {
+	const fourBullets = `{"header":{"full_name":"Ada Lovelace"},"summary":"Backend engineer",` +
+		`"experience":[{"company":"Acme","title":"Engineer","bullets":["A","B","C","D"]}]}`
+	a, repo := cvToolsAPI(t, fourBullets)
+
+	tool := toolByName(t, a.assistantCVTools(testCVID, 9, uuid.New()), "cv_edit")
+	// Non-adjacent, and named against the document the model read.
+	_, err := tool.Run(context.Background(), 3, json.RawMessage(
+		`{"ops":[{"kind":"remove","path":"experience[0].bullets[1]"},{"kind":"remove","path":"experience[0].bullets[3]"}]}`))
+	if err != nil {
+		t.Fatalf("cv_edit: %v", err)
+	}
+
+	var stored struct {
+		Experience []struct {
+			Bullets []string `json:"bullets"`
+		} `json:"experience"`
+	}
+	if err := json.Unmarshal(repo.written, &stored); err != nil {
+		t.Fatalf("decode stored document: %v", err)
+	}
+	want := []string{"A", "C"}
+	if got := stored.Experience[0].Bullets; !reflect.DeepEqual(got, want) {
+		t.Errorf("bullets = %q, want %q", got, want)
 	}
 }
 

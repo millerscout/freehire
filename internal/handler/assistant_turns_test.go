@@ -184,3 +184,39 @@ func TestTurnRegistryIsSafeUnderConcurrentUse(t *testing.T) {
 		t.Fatalf("registry holds %d entries after every turn ended, want 0", n)
 	}
 }
+
+// Stop must reach a turn that has not started yet. Otherwise pressing Stop with a message
+// queued behind the running one CANCELS the running turn and thereby STARTS the queued one —
+// the opposite of what was asked.
+func TestTurnRegistryCancelReachesAQueuedTurn(t *testing.T) {
+	var reg turnRegistry
+	session := uuid.New()
+
+	running, _, _ := reg.claim(session, func() {})
+	waitCtx, waitCancel := context.WithCancel(context.Background())
+	_, waiter, err := reg.claim(session, waitCancel)
+	if err != nil || waiter == nil {
+		t.Fatalf("second claim did not queue: %v, %v", waiter, err)
+	}
+
+	entered := make(chan error, 1)
+	go func() {
+		_, err := waiter.enter(waitCtx, waitCancel)
+		entered <- err
+	}()
+
+	reg.cancel(session)
+	reg.release(session, running)
+
+	select {
+	case err := <-entered:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("the queued turn started anyway (err = %v)", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the queued turn neither started nor gave up")
+	}
+	if n := reg.len(); n != 0 {
+		t.Fatalf("registry holds %d entries, want 0", n)
+	}
+}

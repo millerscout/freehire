@@ -20,6 +20,9 @@ func TestCancelStopsARunningTurn(t *testing.T) {
 	pool := startPostgres(t)
 	iss := auth.NewIssuer("test-secret", time.Hour)
 	model := newDisconnectModel(t)
+	// Before any t.Cleanup: fiber's Shutdown waits on the connection the blocked turn holds,
+	// so a failed assertion would hang the package rather than report itself.
+	defer model.letGo()
 	app, _ := newAssistantApp(pool, iss, model)
 	_, cookie := assistantUser(t, pool, iss, "cancel@example.test", true)
 	id := createSession(t, app, cookie)
@@ -77,6 +80,9 @@ func TestCancelIsOwnerScoped(t *testing.T) {
 	pool := startPostgres(t)
 	iss := auth.NewIssuer("test-secret", time.Hour)
 	model := newDisconnectModel(t)
+	// Before any t.Cleanup: fiber's Shutdown waits on the connection the blocked turn holds,
+	// so a failed assertion would hang the package rather than report itself.
+	defer model.letGo()
 	app, _ := newAssistantApp(pool, iss, model)
 	_, owner := assistantUser(t, pool, iss, "cancel-owner@example.test", true)
 	_, stranger := assistantUser(t, pool, iss, "cancel-stranger@example.test", true)

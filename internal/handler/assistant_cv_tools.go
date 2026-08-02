@@ -40,7 +40,16 @@ func (b *opBatch) UnmarshalJSON(data []byte) error {
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
-	return dec.Decode((*[]cvedit.Op)(b))
+	if err := dec.Decode((*[]cvedit.Op)(b)); err != nil {
+		return err
+	}
+	// A second value means the string held more than the one batch — two arrays, or an array
+	// and some trailing text. Applying the first and dropping the rest is the same silent
+	// helpfulness the unknown-field check exists to refuse.
+	if dec.More() {
+		return errors.New("ops holds more than one batch")
+	}
+	return nil
 }
 
 // assistantCVTools are the tools a CV-tailoring session gets on top of the shared
@@ -341,12 +350,18 @@ func (h *assistantHandlers) cvEditTool(cvID uuid.UUID, batchID uuid.UUID) assist
 					return nil, fmt.Errorf("edit %d: %w", i+1, err)
 				}
 			}
+			// A model names the positions it SAW: it read the document once and wrote every
+			// index against that reading. Applied in sequence those addresses shift out from
+			// under each other, so a batch removing two lines of one list would refuse itself.
+			// The conversion happens here and not inside the editor, because the editor's other
+			// callers — the whole-document save and undo — state their indices sequentially and
+			// would be corrupted by it.
 			meta, rev, err := h.cv.editor.Commit(ctx, cvID, userID, cvedit.Change{
 				Actor:   cvedit.ActorAgent,
 				Origin:  cvedit.OriginTailorAgent,
 				BatchID: batchID,
 				Note:    in.Note,
-				Ops:     in.Ops,
+				Ops:     cvedit.OrderAgainstOriginal(in.Ops),
 			})
 			if err != nil {
 				return nil, cvToolError(err)

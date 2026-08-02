@@ -62,8 +62,8 @@ func Apply(state State, ops []Op) (State, []Op, error) {
 	}
 
 	inverse := make([]Op, 0, len(ops))
-	for _, i := range applyOrder(ops) {
-		undo, err := applyOne(&working, ops[i])
+	for i, op := range ops {
+		undo, err := applyOne(&working, op)
 		if err != nil {
 			return state, nil, fmt.Errorf("operation %d: %w", i+1, err)
 		}
@@ -72,46 +72,47 @@ func Apply(state State, ops []Op) (State, []Op, error) {
 	return working, inverse, nil
 }
 
-// applyOrder is the order the batch runs in, as positions into ops. It differs from the order
-// the caller wrote in one case: a run of removals addressing the same list goes highest index
-// first.
+// OrderAgainstOriginal rewrites a batch written against the document as the author SAW it into
+// one that means the same thing applied in sequence, by running each list's consecutive
+// removals from the highest index down.
 //
-// A batch names its positions against the document it was written for. Removing an earlier
-// position first shifts every later one out from under its own address, so a batch asking for
-// two positions of one list would refuse itself for a reason the caller never asked for.
-// Reordering is confined to consecutive removals of one list, so no operation ever crosses one
-// that might address what it reads or writes.
+// It is not part of Apply, and that distinction is the whole point. Apply's own index semantics
+// are sequential — each operation addresses the list as the batch has changed it so far — and
+// two of its three callers depend on that: `Diff` states its indices exactly that way, and the
+// inverses Apply itself produces are replayed the same way by undo. Sorting inside Apply
+// silently corrupted both: a save that deleted two non-adjacent bullets deleted the wrong one,
+// and undoing a run left the agent's insertion in place while removing the candidate's line.
 //
-// Error messages keep the caller's own numbering: it is their batch, not this order, that they
-// can see.
-func applyOrder(ops []Op) []int {
-	order := make([]int, len(ops))
-	for i := range order {
-		order[i] = i
-	}
-	for start := 0; start < len(ops); {
-		list, _, ok := listAddress(ops[start])
+// A model is the one author that does not think sequentially: it reads the document once and
+// names the positions it saw. So the conversion belongs where that batch arrives, and nowhere
+// else.
+func OrderAgainstOriginal(ops []Op) []Op {
+	ordered := make([]Op, len(ops))
+	copy(ordered, ops)
+
+	for start := 0; start < len(ordered); {
+		list, _, ok := listAddress(ordered[start])
 		if !ok {
 			start++
 			continue
 		}
 		end := start + 1
-		for end < len(ops) {
-			next, _, ok := listAddress(ops[end])
+		for end < len(ordered) {
+			next, _, ok := listAddress(ordered[end])
 			if !ok || next != list {
 				break
 			}
 			end++
 		}
-		run := order[start:end]
+		run := ordered[start:end]
 		sort.SliceStable(run, func(a, b int) bool {
-			_, x, _ := listAddress(ops[run[a]])
-			_, y, _ := listAddress(ops[run[b]])
+			_, x, _ := listAddress(run[a])
+			_, y, _ := listAddress(run[b])
 			return x > y
 		})
 		start = end
 	}
-	return order
+	return ordered
 }
 
 // listAddress splits a removal's path into the list it addresses and the position within it —

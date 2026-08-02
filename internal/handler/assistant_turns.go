@@ -18,7 +18,11 @@ var errTurnQueueFull = errors.New("this session already has a message waiting")
 // would be held for as long as the turn ahead runs, and an unattended run can go for minutes.
 // A minute is longer than an ordinary turn and short enough that a client learns where it
 // stands rather than staring at a silent stream.
-const turnQueueWait = time.Minute
+//
+// A var so a test can shorten it: the path it guards — a wait that runs out — is one a test
+// would otherwise have to spend a real minute to reach, and untested is how it stayed unnoticed
+// that the queued message is destroyed rather than deferred.
+var turnQueueWait = time.Minute
 
 // turnSlot is one session's running turn, held only for as long as it runs. It carries the
 // turn's cancellation so a later request can reach a turn that is already streaming on another
@@ -53,9 +57,13 @@ func (s *turnSlot) finish() {
 // several places, and a registry that had to be constructed would be nil in whichever one
 // forgot — a nil map read is fine, but the first turn to write one would panic.
 type turnRegistry struct {
-	mu      sync.Mutex
-	turns   map[uuid.UUID]*turnSlot
-	waiting map[uuid.UUID]bool
+	mu    sync.Mutex
+	turns map[uuid.UUID]*turnSlot
+	// waiting holds the cancellation of the message queued behind each session's running turn.
+	// It is the cancellation and not a flag because Stop has to reach a turn that has not
+	// started yet: cancelling only the running one would END it and thereby LET THE QUEUED ONE
+	// IN, which is the opposite of what was asked.
+	waiting map[uuid.UUID]context.CancelFunc
 }
 
 // claim asks for the session's slot on behalf of a turn about to start.
@@ -70,13 +78,13 @@ func (r *turnRegistry) claim(session uuid.UUID, cancel context.CancelFunc) (*tur
 	if _, running := r.turns[session]; !running {
 		return r.take(session, cancel), nil, nil
 	}
-	if r.waiting[session] {
+	if _, queued := r.waiting[session]; queued {
 		return nil, nil, errTurnQueueFull
 	}
 	if r.waiting == nil {
-		r.waiting = make(map[uuid.UUID]bool)
+		r.waiting = make(map[uuid.UUID]context.CancelFunc)
 	}
-	r.waiting[session] = true
+	r.waiting[session] = cancel
 	return nil, &turnWaiter{registry: r, session: session}, nil
 }
 
@@ -108,19 +116,29 @@ func (r *turnRegistry) release(session uuid.UUID, slot *turnSlot) {
 	slot.finish()
 }
 
-// cancel stops the session's running turn, reporting whether there was one. A session with
-// nothing running is not an error: a client cancels what it can no longer see the end of, and
-// asking it to first prove the turn is alive would just make it guess.
+// cancel stops the session's turns — the one running and the one queued behind it, because a
+// caller asking for the work to stop does not mean "and then start the next one".
+//
+// It reports whether there was anything to stop. A session with nothing running is not an
+// error: a client cancels what it can no longer see the end of, and asking it to first prove
+// the turn is alive would just make it guess.
+//
+// The cancellations run under the lock. A CancelFunc reaches nothing in the registry, so it
+// cannot deadlock, and releasing first would leave a window in which the running turn ends, the
+// queued one takes the slot, and the cancel lands on a context that is already dead while its
+// successor runs on.
 func (r *turnRegistry) cancel(session uuid.UUID) bool {
 	r.mu.Lock()
-	slot, running := r.turns[session]
-	r.mu.Unlock()
+	defer r.mu.Unlock()
 
-	if !running {
-		return false
+	slot, running := r.turns[session]
+	if running {
+		slot.cancel()
 	}
-	slot.cancel()
-	return true
+	if queued, waiting := r.waiting[session]; waiting {
+		queued()
+	}
+	return running
 }
 
 // len is the number of turns running, for the tests that guard against the registry keeping
@@ -147,6 +165,13 @@ func (w *turnWaiter) enter(ctx context.Context, cancel context.CancelFunc) (*tur
 	defer w.leave()
 
 	for {
+		// Checked before taking the slot, not only while waiting for it: the turn ahead ending
+		// and this wait being cancelled can happen in either order, and waking to an open slot
+		// is no reason to start work someone has already asked us not to do.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		w.registry.mu.Lock()
 		current, running := w.registry.turns[w.session]
 		if !running {

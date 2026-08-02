@@ -52,7 +52,10 @@ export function reduceTurnEvent(prev: ChatState, event: TurnEvent): ChatState {
     case 'tool_result':
       return upsertAssistant(prev, (m) => ({ ...m, tools: attachResult(m.tools, event) }));
     case 'result':
-      return closeAssistant(prev, event.is_error ?? false);
+      // Clears the wait as well as closing the turn: a wait can end WITHOUT the turn ever
+      // starting (it timed out, or was stopped), and a banner still claiming to be queued
+      // would then mask the next turn's real progress.
+      return { ...closeAssistant(prev, event.is_error ?? false), queued: false };
     default:
       // usage, and anything not in the union — ignored.
       return prev;

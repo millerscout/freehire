@@ -40,10 +40,16 @@ export class StreamInterrupted extends Error {
 /** Ask the server to stop a session's running turn. Safe to call when nothing is
  *  running: the caller cannot know whether the turn it stopped watching has ended. */
 export async function cancelTurn(sessionId: string): Promise<void> {
-  await fetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/cancel`, {
-    method: 'POST',
-    credentials: 'include',
-  });
+  try {
+    await fetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/cancel`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } catch {
+    // Best-effort by nature: offline, or the route answered badly. There is nothing the user
+    // can do about it and nothing to show them — the turn ends at its step cap either way, and
+    // an unhandled rejection here would be reported as a fault they did not cause.
+  }
 }
 
 /**
@@ -140,7 +146,8 @@ function streamTurn(
     done,
     cancel: () => {
       // Both halves: tell the server to stop the work, and stop reading it here. The
-      // server no longer infers the first from the second.
+      // server no longer infers the first from the second. cancelTurn swallows its own
+      // failures, so this cannot reject.
       void cancelTurn(sessionId);
       controller.abort();
     },

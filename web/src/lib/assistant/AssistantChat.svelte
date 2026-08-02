@@ -120,8 +120,8 @@
   let chat = $state<ChatState>(initChat());
   let draft = $state('');
   let turnActive = $state(false);
-  // The turn in flight, so it can be cancelled. Aborting the request is what
-  // tells the backend to stop the loop.
+  // The turn in flight, so it can be cancelled. Cancelling asks the server to stop the work;
+  // aborting the fetch only stops this client reading it.
   let turn: Turn | null = null;
 
   let sidebarOpen = $state(true);
@@ -502,8 +502,9 @@
     }
   }
 
-  /** Stop an in-flight turn. The backend notices its next write fail and stops the
-   *  loop before spending another model call. */
+  /** Stop an in-flight turn: ask the server to stop the work, and stop reading it here. The
+   *  backend no longer infers the first from the second — it could not tell a deliberate stop
+   *  apart from a phone locking its screen. */
   function cancelTurn() {
     turn?.cancel();
     turn = null;
@@ -587,20 +588,35 @@
         /* the host reports its own save failures; a turn is still worth starting */
       }
     }
+    // Whether the turn ever began. A message can queue behind the session's running turn and
+    // then never start — the wait runs out, or it is stopped — and the composer cleared the
+    // draft the moment it was sent. Without this the user's words would simply vanish.
+    let began = false;
+    const watch = (event: TurnEvent) => {
+      if (event.type === 'user_prompt') began = true;
+      onEvent(id, event);
+    };
+
     let started: Turn;
     if (start.kind === 'autopilot') {
       runActive = true;
       onRunStateChange?.(true);
-      started = startAutopilot(id, (event) => onEvent(id, event));
+      started = startAutopilot(id, watch);
     } else if (start.kind === 'opening') {
-      started = openRehearsal(id, (event) => onEvent(id, event));
+      started = openRehearsal(id, watch);
     } else {
-      started = sendTurn(id, start.text, (event) => onEvent(id, event));
+      started = sendTurn(id, start.text, watch);
     }
     turn = started;
     void scrollToBottom(true);
     try {
       await started.done;
+      if (!began && start.kind === 'message' && id === activeId) {
+        // The turn never ran, so the message was never recorded. Give it back rather than
+        // losing it, and say why — the composer is empty and nothing else would explain it.
+        draft = draft.trim() === '' ? start.text : draft;
+        error = 'That message was not sent: the chat was still busy. Try again.';
+      }
     } catch (err) {
       if (err instanceof StreamInterrupted) {
         // The stream broke, not the turn: it runs on the server under its own bounds and
