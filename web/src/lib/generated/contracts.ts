@@ -1054,15 +1054,59 @@ export interface RevisionView {
   created_at: string;
 }
 
+/**
+ * Display is a captured form shaped for a candidate to read rather than for a
+ * machine to submit. It is the near-inverse of what the store keeps: the store holds
+ * the platform's identifiers and option values because they exist to be handed back,
+ * and a reader wants none of that — only the question and one word about the answer.
+ */
+export interface Display {
+  /**
+   * Provider is the platform the form was read from, so a reader can say where the
+   * answer came from.
+   */
+  provider: string;
+  /**
+   * Basics are the controls every application demands — name, contact details, CV —
+   * listed once instead of one entry each. Stated rather than dropped, because a
+   * form that does NOT want a CV is worth knowing too.
+   */
+  basics: string[];
+  /**
+   * Questions are the employer's own, in the order the form presents them.
+   */
+  questions: Question[];
+}
+/**
+ * Question is one thing the employer will ask.
+ */
+export interface Question {
+  /**
+   * Text is the question as the employer wrote it, unedited.
+   */
+  text: string;
+  /**
+   * Required is whether the platform refuses the application without an answer.
+   */
+  required: boolean;
+  /**
+   * Answer names the kind of answer expected, empty where naming it would add
+   * nothing (a one-line answer is the default expectation) or where the capture
+   * could not normalize the control's kind.
+   */
+  answer?: string;
+}
+
 export const SOURCE_VALUES = ['telegram', 'workatastartup', 'remoteok', 'arc', '4dayweek', 'adp', 'applicantpro', 'apploi', 'arbeitnow', 'arbeitsagentur', 'ashby', 'ashbygraphql', 'avature', 'bamboohr', 'bayt', 'betterteam', 'breezy', 'briefhq', 'bullhorn', 'careerplug', 'careerspage', 'catsone', 'cleverstaff', 'clinch', 'comeet', 'compleo', 'cornerstone', 'crelate', 'deel', 'djinni', 'earcu', 'eightfold', 'enlizt', 'epam', 'erecruiter', 'factorial', 'freshteam', 'functionalworks', 'geekjob', 'gem', 'getmanfred', 'getmatch', 'getonbrd', 'getro', 'globalpayments', 'greenhouse', 'gulftalent', 'gupy', 'habr_career', 'hh', 'hibob', 'himalayas', 'hireology', 'huntflow', 'hurma', 'icims', 'infojobs', 'inhire', 'instaffo', 'ismartrecruit', 'isolvedhire', 'itechart', 'jazzhr', 'jibe', 'jobdanmark', 'jobicy', 'jobnet', 'jobscore', 'jobspresso', 'jobstash', 'jobtech', 'jobvite', 'jobylon', 'join', 'justjoin', 'lever', 'likeit', 'loxo', 'luxoft', 'manatal', 'mindsight', 'mycareersfuture', 'neogov', 'nofluffjobs', 'northstone', 'odoo', 'opencats', 'oracle', 'pageup', 'paycom', 'paylocity', 'peopleforce', 'personio', 'phenom', 'pinpoint', 'powertofly', 'quickin', 'radancy', 'rapyd', 'recruitee', 'recruitingsolutions', 'reed', 'remotive', 'rippling', 'senior', 'smartrecruiters', 'softgarden', 'solides', 'spark', 'speedrun', 'startupandvc', 'successfactors', 'talentadore', 'talenthr', 'talentlyft', 'taleo', 'teamex', 'teamtailor', 'tecla', 'thehub', 'topco', 'traffit', 'trakstar', 'trudvsem', 'tyomarkkinatori', 'ukg', 'usajobs', 'vagas', 'vention', 'vouch', 'wantapply', 'wantedkr', 'weworkremotely', 'whatjobs', 'workable', 'workablemarketplace', 'workday', 'workingnomads', 'wpyoast', 'zohorecruit'] as const;
 export type Source = (typeof SOURCE_VALUES)[number];
-export const STAGE_VALUES = ['applied', 'screening', 'responded', 'interview', 'offer', 'accepted', 'rejected', 'withdrawn'] as const;
+export const STAGE_VALUES = ['applied', 'screening', 'responded', 'interview', 'offer', 'accepted', 'rejected', 'withdrawn', 'expired'] as const;
 export type Stage = (typeof STAGE_VALUES)[number];
 export const APPLICATION_EVENT_KINDS = ['applied', 'employer_reply', 'follow_up_sent', 'stage_set', 'interview_scheduled'] as const;
 export type ApplicationEventKind = (typeof APPLICATION_EVENT_KINDS)[number];
 export const STAGE_LABELS = {
   'accepted': 'Accepted',
   'applied': 'Applied',
+  'expired': 'Expired',
   'interview': 'Interview',
   'offer': 'Offer',
   'rejected': 'Rejected',
@@ -1075,7 +1119,7 @@ export const STAGE_GROUPS = [
   { id: 'applied', label: 'Applied', stages: ['applied', 'screening', 'responded'] },
   { id: 'interview', label: 'Interview', stages: ['interview'] },
   { id: 'offer', label: 'Offer', stages: ['offer'] },
-  { id: 'closed', label: 'Closed', stages: ['accepted', 'rejected', 'withdrawn'] },
+  { id: 'closed', label: 'Closed', stages: ['accepted', 'rejected', 'withdrawn', 'expired'] },
 ] as const;
 export type StageGroup = (typeof STAGE_GROUPS)[number];
 export const WORK_MODE_VALUES = ['remote', 'hybrid', 'onsite'] as const;
