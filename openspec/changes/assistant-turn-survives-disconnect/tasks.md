@@ -40,10 +40,10 @@
 
 ## 6. The client stops lying about interrupted turns
 
-- [ ] 6.1 Failing test in `web`: an aborted read currently marks the message errored; assert an interrupted stream is not rendered as a failed turn
-- [ ] 6.2 Point the Stop button at the cancel endpoint; keep `abort()` as the way this client stops reading
-- [ ] 6.3 Re-read the session on `visibilitychange` when a turn was in flight, and render the transcript the server holds
-- [ ] 6.4 Render the `queued` event so a waiting message reads as waiting rather than as a stalled turn
+- [x] 6.1 Failing test in `web`: an aborted read currently marks the message errored; assert an interrupted stream is not rendered as a failed turn
+- [x] 6.2 Point the Stop button at the cancel endpoint; keep `abort()` as the way this client stops reading
+- [x] 6.3 Re-read the session on `visibilitychange` when a turn was in flight, and render the transcript the server holds
+- [x] 6.4 Render the `queued` event so a waiting message reads as waiting rather than as a stalled turn
 - [ ] 6.5 Failing test: returning to a tab whose stream was interrupted shows the messages produced in the meantime
 
 ## 7. Verification

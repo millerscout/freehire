@@ -12,7 +12,13 @@
   } from '$lib/assistant/api';
   import { track } from '$lib/analytics';
   import { forDisplay, shouldRequest } from '$lib/assistant/followups';
-  import { openRehearsal, sendTurn, startAutopilot, type Turn } from '$lib/assistant/client';
+  import {
+    openRehearsal,
+    sendTurn,
+    startAutopilot,
+    StreamInterrupted,
+    type Turn,
+  } from '$lib/assistant/client';
   import { initChat, reduceTurnEvent, type ChatState } from '$lib/assistant/chat';
   import { splitPresentingCalls } from '$lib/assistant/deck';
   import { atBottom } from '$lib/assistant/scrolling';
@@ -596,9 +602,32 @@
     try {
       await started.done;
     } catch (err) {
+      if (err instanceof StreamInterrupted) {
+        // The stream broke, not the turn: it runs on the server under its own bounds and
+        // stores everything it does. Marking the message as failed would tell the user
+        // their CV edits were lost when they were not — so we re-read the session and show
+        // whatever the agent has managed so far.
+        await reloadTranscript(id);
+        endTurn();
+        return;
+      }
       error = err instanceof Error ? err.message : 'Could not send the message.';
       chat = reduceTurnEvent(chat, { type: 'result', stop_reason: 'error', is_error: true });
       endTurn();
+    }
+  }
+
+  /** Re-read a session's stored transcript into the view. The server holds the truth about a
+   *  turn whose stream we lost, so this is how a returning client catches up. */
+  async function reloadTranscript(id: string) {
+    if (id !== activeId) return;
+    try {
+      const { messages } = await getSession(id);
+      let next = initChat();
+      for (const event of eventsFromTranscript(messages)) next = reduceTurnEvent(next, event);
+      if (id === activeId) chat = next;
+    } catch {
+      /* the transcript stays as it is; the next visit will catch up */
     }
   }
 
@@ -606,9 +635,22 @@
     queue = queue.filter((q) => q.id !== id);
   }
 
+  /** Catch up when the tab comes back. A phone freezes a backgrounded tab, which breaks the
+   *  stream while the turn keeps running on the server — so what is on screen when the user
+   *  returns is whatever arrived before the freeze, and the session holds the rest. Nothing
+   *  is re-read while a turn is streaming: that stream is already the newer truth. */
+  function catchUpOnReturn() {
+    if (document.visibilityState !== 'visible' || turnActive || !activeId) return;
+    void reloadTranscript(activeId);
+  }
+
   onMount(() => {
     void boot();
-    return cancelTurn;
+    document.addEventListener('visibilitychange', catchUpOnReturn);
+    return () => {
+      document.removeEventListener('visibilitychange', catchUpOnReturn);
+      cancelTurn();
+    };
   });
 </script>
 
@@ -837,7 +879,16 @@
             </div>
           {/if}
 
-          {#if turnActive}
+          <!-- Waiting behind another turn of this session. Distinct from working: nothing is
+               being spent yet, and the elapsed counter would be measuring someone else's turn. -->
+          {#if chat.queued}
+            <div class="self-start inline-flex items-baseline gap-2 px-2 py-1 text-xs text-muted-foreground">
+              <span class="star-glow font-mono text-[0.85rem] font-semibold">
+                {SPINNER_GLYPHS[spinnerIdx]}
+              </span>
+              <span class="shimmer font-medium">Waiting for the current turn to finish…</span>
+            </div>
+          {:else if turnActive}
             <div class="self-start inline-flex items-baseline gap-2 px-2 py-1 text-xs text-muted-foreground">
               <span class="star-glow font-mono text-[0.85rem] font-semibold">
                 {SPINNER_GLYPHS[spinnerIdx]}

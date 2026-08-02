@@ -22,18 +22,24 @@ export interface ChatMessage {
 
 export interface ChatState {
   messages: ChatMessage[];
+  /** The turn is waiting for another one to finish in this session. Its own frames have not
+   *  started, so without this the view would show a silent stream and nothing else. */
+  queued: boolean;
 }
 
 export function initChat(): ChatState {
-  return { messages: [] };
+  return { messages: [], queued: false };
 }
 
 /** Fold one `TurnEvent` into the chat state, returning a new state (never
  *  mutates the input). Unmodeled/unknown event kinds are ignored (no throw). */
 export function reduceTurnEvent(prev: ChatState, event: TurnEvent): ChatState {
   switch (event.type) {
+    case 'queued':
+      return { ...prev, queued: true };
     case 'user_prompt':
-      return { messages: [...prev.messages, userMessage(event.text)] };
+      // The turn is under way: whatever wait preceded it is over.
+      return { ...prev, messages: [...prev.messages, userMessage(event.text)], queued: false };
     case 'assistant_text':
       return upsertAssistant(prev, (m) => ({ ...m, text: m.text + event.text }));
     case 'assistant_thought':
@@ -92,9 +98,9 @@ function newAssistant(): ChatMessage {
 function upsertAssistant(prev: ChatState, fn: (m: ChatMessage) => ChatMessage): ChatState {
   const last = prev.messages[prev.messages.length - 1];
   if (last && last.role === 'assistant' && last.streaming) {
-    return { messages: [...prev.messages.slice(0, -1), fn(last)] };
+    return { ...prev, messages: [...prev.messages.slice(0, -1), fn(last)] };
   }
-  return { messages: [...prev.messages, fn(newAssistant())] };
+  return { ...prev, messages: [...prev.messages, fn(newAssistant())] };
 }
 
 /** Close the open assistant turn. A result with no open turn is ignored (never
@@ -103,5 +109,5 @@ function closeAssistant(prev: ChatState, errored: boolean): ChatState {
   const last = prev.messages[prev.messages.length - 1];
   if (!last || last.role !== 'assistant' || !last.streaming) return prev;
   const closed: ChatMessage = { ...last, streaming: false, errored };
-  return { messages: [...prev.messages.slice(0, -1), closed] };
+  return { ...prev, messages: [...prev.messages.slice(0, -1), closed] };
 }
