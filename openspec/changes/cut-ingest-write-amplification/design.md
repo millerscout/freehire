@@ -145,17 +145,37 @@ change to an operational contract and is accepted rather than worked around: inc
 dictionary version in the hash would invalidate the whole catalogue on every dictionary
 edit, which is the opposite of what this change is for.
 
+The same applies to a change in a derivation's own code, not only its dictionary — a new
+normalization rule in `RoleFingerprint`, say. That is the sharper case: unlike adding a field
+to `jobhash.Of`, it does not move any stored hash, so it would never propagate through a
+crawl again.
+
 The reconciler already exists and is the documented mechanism — `cmd/backfill-derive`
 re-derives these three in one keyset pass, and already compares before writing, so it is
 cheap on a catalogue where little moved. What changes is that running it after a dictionary
-edit becomes required rather than merely faster than waiting.
+or derivation edit becomes required rather than merely faster than waiting.
 
 Read its own doc comment before making that routine: the pass re-derives **every**
-deterministic column, not only the three — all thirteen facets, the role fingerprint and
-both slugs — and in doing so overwrites structured-source facets an adapter supplied and
-blanks moderator-stated `regions`/`cities` on hand-authored rows. That blast radius is
-unchanged by this change, but promoting the command from occasional to routine makes it
-newly relevant.
+deterministic column — all thirteen facets, the role fingerprint and both slugs — and in
+doing so overwrites structured-source facets an adapter supplied and blanks moderator-stated
+`regions`/`cities` on hand-authored rows. That blast radius is unchanged by this change, but
+promoting the command from occasional to routine makes it newly relevant.
+
+### Two pre-existing gaps this change leans on without widening
+
+Neither is introduced here and neither is fixed here; both are recorded because the design
+now depends on the paths they sit on.
+
+- **A reopen with unchanged content reaches no live index push.** `UpsertJob` reports
+  `changed = false` (the stored hash equals the incoming one) and `inserted = false`, so the
+  reopened row stays absent from the live index until the next full rebuild. The behaviour is
+  identical before and after this change, but `closed_at IS NULL` is now described as a
+  correctness predicate, which makes the reopen path more load-bearing than it was.
+- **A `cities`-only drift reaches no live index push either**, for the same reason — the hash
+  did not move — even though `cities` is part of the search document. Also identical before
+  and after: the old code ran `UpsertJob`, wrote the new `cities`, and reported
+  `changed = false`. Unreachable from ingest today in any case, since `normalizeJob` supplies
+  no structured cities.
 
 ### Only `UpsertJob`'s company CTE is guarded
 

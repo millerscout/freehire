@@ -11,7 +11,6 @@ package main
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -174,6 +173,7 @@ func TestSaveWithApplyForm_UnchangedRecrawlStillWritesTheForm(t *testing.T) {
 		t.Fatalf("first SaveWithApplyForm: %v", err)
 	}
 	backdateStamps(t, pool, "acme:cheap-3")
+	before := loadJob(t, pool, "acme:cheap-3")
 
 	// The posting itself is byte-identical, so this re-crawl takes the cheap write — and the
 	// employer's edited form must still be stored.
@@ -189,8 +189,11 @@ func TestSaveWithApplyForm_UnchangedRecrawlStillWritesTheForm(t *testing.T) {
 			"skipped when the posting itself is unchanged", got.Fields)
 	}
 
-	// And the liveness still moved, proving the cheap branch is what ran.
-	if j := loadJob(t, pool, "acme:cheap-3"); time.Since(j.LastSeenAt.Time) > time.Minute {
-		t.Errorf("last_seen_at = %v, want ~now", j.LastSeenAt.Time)
+	// That the CHEAP branch is what ran has to be asserted on updated_at, not on last_seen_at:
+	// both branches advance the liveness stamp, so it cannot tell them apart and a seam that
+	// stopped working would leave this test green.
+	if j := loadJob(t, pool, "acme:cheap-3"); !j.UpdatedAt.Time.Equal(before.UpdatedAt.Time) {
+		t.Errorf("updated_at = %v, want unchanged %v — the form write must not drag the posting "+
+			"onto the full upsert", j.UpdatedAt.Time, before.UpdatedAt.Time)
 	}
 }

@@ -32,6 +32,9 @@ func TestNeedsIndex(t *testing.T) {
 		{"new posting", full(true, true), true},
 		{"edited posting", full(false, true), true},
 		{"liveness-only refresh", cheap(), false},
+		// Still reachable through the FULL upsert: a closed posting reopening with identical
+		// content, or a cities-only drift, both miss the cheap write and then report neither.
+		{"full write that changed nothing", full(false, false), false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -69,6 +72,7 @@ func TestClustersByRole(t *testing.T) {
 		// Re-crawls are the bulk of a pass; the batch recompute owns them, not the hot path.
 		{"edited posting", full(false, true), false},
 		{"liveness-only refresh", cheap(), false},
+		{"full write that changed nothing", full(false, false), false},
 		// A row that already knows it is a repost has nothing to ask.
 		{"already marked", marked(full(true, true)), false},
 	}

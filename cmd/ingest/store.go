@@ -274,7 +274,10 @@ func (s *dbStore) save(ctx context.Context, j job.Job, form *applyform.Form) err
 	// A non-canonical repost is not searchable, so it never reaches the live index —
 	// whether it was marked by a prior recompute or by the write above. What still falls
 	// to the reindex is a row that only became a repost after it was written.
-	if s.indexer != nil && needsIndex(saved) && !deduped && !saved.duplicateOf.Valid {
+	// saved.row != nil is implied by needsIndex — only the full write reports inserted or
+	// changed — but it is stated because the reads below dereference it, and nothing in this
+	// binary recovers a panic: a divergence would kill the crawl rather than skip a push.
+	if s.indexer != nil && saved.row != nil && needsIndex(saved) && !deduped && !saved.duplicateOf.Valid {
 		// The job-reality signal needs this role's cluster counts; a lookup failure
 		// degrades to a unique role (counts 1) rather than failing the index push.
 		repost, mass := int64(1), int64(1)
