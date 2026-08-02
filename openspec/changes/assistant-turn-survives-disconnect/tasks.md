@@ -10,16 +10,16 @@
 
 ## 2. Turn registry
 
-- [ ] 2.1 Failing test in `internal/handler`: two turns started for one session both run today; assert the registry admits one and reports the session busy to the second
-- [ ] 2.2 Add the per-session turn registry to `assistantHandlers`: session id to turn state holding its `CancelFunc` and a channel closed when the turn ends, guarded by a mutex
-- [ ] 2.3 Register a turn as it starts and remove it in a `defer` beside the existing `cancel` defer
-- [ ] 2.4 Failing test: the registry is empty after a turn ends, including a turn that ended in error
+- [x] 2.1 Failing test in `internal/handler`: two turns started for one session both run today; assert the registry admits one and reports the session busy to the second
+- [x] 2.2 Add the per-session turn registry to `assistantHandlers`: session id to turn state holding its `CancelFunc` and a channel closed when the turn ends, guarded by a mutex
+- [x] 2.3 Register a turn as it starts and remove it in a `defer` beside the existing `cancel` defer
+- [x] 2.4 Failing test: the registry is empty after a turn ends, including a turn that ended in error
 
 ## 3. The turn stops depending on its reader
 
-- [ ] 3.1 Failing test in `internal/handler`: with every SSE write failing from the first event, the turn is cut short today; assert it runs to its own end and its messages are persisted
-- [ ] 3.2 Remove the `cancel()` call from the SSE event callback in `streamTurn`; a failed write stops writing only
-- [ ] 3.3 Failing test: a turn whose reader vanished mid-run still reaches and stores its final tool call, mirroring the lost `tailor_report`
+- [x] 3.1 Failing test in `internal/handler`: with every SSE write failing from the first event, the turn is cut short today; assert it runs to its own end and its messages are persisted
+- [x] 3.2 Remove the `cancel()` call from the SSE event callback in `streamTurn`; a failed write stops writing only
+- [x] 3.3 Failing test: a turn whose reader vanished mid-run still reaches and stores its final tool call, mirroring the lost `tailor_report`
 - [ ] 3.4 Confirm the keep-alive goroutine and the write deadline still end with the turn and leak nothing when nobody reads
 
 ## 4. Cancellation gets its own channel

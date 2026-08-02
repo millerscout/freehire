@@ -49,6 +49,11 @@ type assistantHandlers struct {
 	// and one field holding both would eventually be handed the wrong one.
 	followUpLLM llmBinding
 
+	// turns are the turns running right now, so a cancel request can reach one that is
+	// streaming on a goroutine no request owns any more, and so a session keeps to one turn
+	// at a time. Its zero value works; see assistant_turns.go.
+	turns turnRegistry
+
 	queries  *db.Queries
 	search   *searchHandlers
 	resume   *resumeHandlers
@@ -462,6 +467,17 @@ func (h *assistantHandlers) streamTurn(c *fiber.Ctx, sess assistant.Session, pro
 		hub = reqHub.Clone()
 	}
 
+	// The turn runs on its own cancellable context: the request's own is released the moment
+	// this handler returns, long before the turn ends. It is created HERE rather than inside
+	// the writer so the session's slot is taken while the request can still be answered — a
+	// slot taken after the handler returned could not refuse anything.
+	ctx, cancel := context.WithCancel(context.Background())
+	slot, admitted := h.turns.admit(sess.ID, cancel)
+	if !admitted {
+		cancel()
+		return fiber.NewError(fiber.StatusConflict, "this session is already running a turn")
+	}
+
 	c.Context().SetBodyStreamWriter(fasthttp.StreamWriter(func(w *bufio.Writer) {
 		// sseStream owns the write protocol both SSE endpoints need: it serializes the
 		// heartbeat goroutine against the event callback (bufio.Writer is not safe for
@@ -474,20 +490,22 @@ func (h *assistantHandlers) streamTurn(c *fiber.Ctx, sess assistant.Session, pro
 		// would block the write, and with it this goroutine, for the life of the process.
 		stream := newSSEStream(w, conn, sseWriteTimeout)
 
-		// The request context is gone once the handler returns, so the turn runs on
-		// its own cancellable context. Cancellation comes from the client going away,
-		// which shows up as a failed write below.
-		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+		defer h.turns.release(sess.ID, slot)
 
 		stopHeartbeat := stream.keepalive(sseKeepalive)
 
 		err := turnRunner.Run(ctx, sess, registry, system, prompt, turn, func(e assistant.Event) {
-			if !stream.event(string(e.Kind), e) {
-				// The client is gone. Stop the loop at its next boundary rather than
-				// finishing a turn nobody is reading.
-				cancel()
-			}
+			// A write that fails means THIS reader is not listening: a phone froze its tab,
+			// a tunnel dropped, a laptop slept. It does not mean the work should stop, and
+			// treating it that way threw away live runs — a tailoring pass lost its report
+			// after twenty-five committed edits because a tab went to the background.
+			//
+			// So the event is simply not delivered. The turn runs to its own end under the
+			// bounds it already has (the step cap and the model timeout), the transcript is
+			// persisted either way, and a client that comes back reads it from the session.
+			// Stopping a turn is now something a caller ASKS for, through the cancel route.
+			stream.event(string(e.Kind), e)
 		})
 		stopHeartbeat()
 		if err != nil {
