@@ -149,6 +149,7 @@ func (h *assistantHandlers) register(api fiber.Router, mw middleware) {
 	api.Get("/assistant/sessions/:id", mw.key, h.GetAssistantSession)
 	api.Delete("/assistant/sessions/:id", mw.key, h.DeleteAssistantSession)
 	api.Post("/assistant/sessions/:id/messages", mw.key, h.PostAssistantMessage)
+	api.Post("/assistant/sessions/:id/cancel", mw.key, h.CancelAssistantTurn)
 	api.Post("/assistant/sessions/:id/opening", mw.key, h.PostAssistantOpening)
 	api.Post("/assistant/sessions/:id/followups", mw.key, h.PostAssistantFollowUps)
 	// Cookie-only: an unattended run rewrites a CV, and the browser is the only place
@@ -401,6 +402,32 @@ func (h *assistantHandlers) DeleteAssistantSession(c *fiber.Ctx) error {
 	if err := h.store.DeleteSession(c.Context(), id, userID); err != nil {
 		return mapAssistantError(err)
 	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// CancelAssistantTurn stops the session's running turn.
+//
+// It exists because stopping used to be a side effect of the transport: the client aborted its
+// read, the next write failed, and the turn was cancelled. That made a deliberate stop
+// indistinguishable from a phone freezing its tab, and the turn paid for the confusion. Now the
+// two are different things, and this is the one that means stop.
+//
+// A session with nothing running is not an error. A client cancels a turn whose end it cannot
+// see; requiring it to first prove the turn is alive would ask it for the one fact it does not
+// have. The ownership check comes first either way, so an id cannot be probed for existence.
+func (h *assistantHandlers) CancelAssistantTurn(c *fiber.Ctx) error {
+	userID, err := requireUserID(c)
+	if err != nil {
+		return err
+	}
+	id, err := assistantSessionID(c)
+	if err != nil {
+		return err
+	}
+	if _, err := h.store.Session(c.Context(), id, userID); err != nil {
+		return mapAssistantError(err)
+	}
+	h.turns.cancel(id)
 	return c.SendStatus(fiber.StatusNoContent)
 }
 

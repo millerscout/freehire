@@ -24,11 +24,11 @@
 
 ## 4. Cancellation gets its own channel
 
-- [ ] 4.1 Failing test: `POST /api/v1/assistant/sessions/:id/cancel` does not exist; assert it stops the session's running turn before its next model call
-- [ ] 4.2 Add the route and handler, resolving the session with the same owner-scoped read used elsewhere
-- [ ] 4.3 Failing test: cancelling a session with no turn in flight succeeds and changes nothing
-- [ ] 4.4 Failing test: a caller who does not own the session gets the session reported as missing, and the turn keeps running
-- [ ] 4.5 Failing test: work committed before cancellation stays committed and the partial transcript is stored
+- [x] 4.1 Failing test: `POST /api/v1/assistant/sessions/:id/cancel` does not exist; assert it stops the session's running turn before its next model call
+- [x] 4.2 Add the route and handler, resolving the session with the same owner-scoped read used elsewhere
+- [x] 4.3 Failing test: cancelling a session with no turn in flight succeeds and changes nothing
+- [x] 4.4 Failing test: a caller who does not own the session gets the session reported as missing, and the turn keeps running
+- [x] 4.5 Failing test: work committed before cancellation stays committed and the partial transcript is stored
 
 ## 5. One turn at a time within a session
 

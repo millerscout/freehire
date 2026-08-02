@@ -13,8 +13,10 @@ package handler
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,16 +35,30 @@ import (
 type disconnectModel struct {
 	calls    int
 	started  chan struct{} // closed once the first round is under way
-	release  chan struct{} // the test closes this after cutting the connection
+	release  chan struct{} // released once the test has cut or cancelled the connection
 	answered chan struct{} // closed when the second round runs — the turn survived
+
+	releaseOnce sync.Once
 }
 
-func newDisconnectModel() *disconnectModel {
-	return &disconnectModel{
+// newDisconnectModel wires the model and guarantees it is let go at the end of the test. A
+// model left blocked on release holds the turn's goroutine, and the app's shutdown waits on it
+// — so a failing assertion would hang the whole package instead of reporting itself.
+func newDisconnectModel(t *testing.T) *disconnectModel {
+	t.Helper()
+	m := &disconnectModel{
 		started:  make(chan struct{}),
 		release:  make(chan struct{}),
 		answered: make(chan struct{}),
 	}
+	t.Cleanup(m.letGo)
+	return m
+}
+
+// letGo releases the model however many times it is called, so a test may release it explicitly
+// and still be cleaned up after.
+func (m *disconnectModel) letGo() {
+	m.releaseOnce.Do(func() { close(m.release) })
 }
 
 const disconnectAnswer = "the answer nobody was listening for"
@@ -75,9 +91,9 @@ func serveOnSocket(t *testing.T, app *fiber.App) string {
 	return ln.Addr().String()
 }
 
-// startTurnThenCut opens a turn, waits for it to be under way, and cuts the connection —
-// leaving the server writing into a socket that is gone.
-func startTurnThenCut(t *testing.T, addr, sessionID, cookie string, started <-chan struct{}) {
+// dialTurn opens a turn on a raw socket and returns the connection, so a test can decide what
+// to do to it — cut it, or keep reading.
+func dialTurn(t *testing.T, addr, sessionID, cookie string) net.Conn {
 	t.Helper()
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -92,6 +108,30 @@ func startTurnThenCut(t *testing.T, addr, sessionID, cookie string, started <-ch
 	if _, err := conn.Write([]byte(request)); err != nil {
 		t.Fatalf("write request: %v", err)
 	}
+	return conn
+}
+
+// startTurnInBackground opens a turn and keeps reading it — what a client that is actually
+// watching does, so nothing about the connection can be mistaken for the user leaving. The
+// returned channel closes when the stream ends.
+func startTurnInBackground(t *testing.T, addr, sessionID, cookie string) <-chan struct{} {
+	t.Helper()
+	conn := dialTurn(t, addr, sessionID, cookie)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() { _ = conn.Close() }()
+		_, _ = io.Copy(io.Discard, conn)
+	}()
+	return done
+}
+
+// startTurnThenCut opens a turn, waits for it to be under way, and cuts the connection —
+// leaving the server writing into a socket that is gone.
+func startTurnThenCut(t *testing.T, addr, sessionID, cookie string, started <-chan struct{}) {
+	t.Helper()
+	conn := dialTurn(t, addr, sessionID, cookie)
 
 	// Read enough to know the response is open, so the cut lands mid-turn rather than before
 	// the handler ever ran.
@@ -115,14 +155,14 @@ func startTurnThenCut(t *testing.T, addr, sessionID, cookie string, started <-ch
 func TestTurnSurvivesAClientThatStopsReading(t *testing.T) {
 	pool := startPostgres(t)
 	iss := auth.NewIssuer("test-secret", time.Hour)
-	model := newDisconnectModel()
+	model := newDisconnectModel(t)
 	app, _ := newAssistantApp(pool, iss, model)
 	_, cookie := assistantUser(t, pool, iss, "disconnect@example.test", true)
 	id := createSession(t, app, cookie)
 	addr := serveOnSocket(t, app)
 
 	startTurnThenCut(t, addr, id, cookie, model.started)
-	close(model.release)
+	model.letGo()
 
 	select {
 	case <-model.answered:
