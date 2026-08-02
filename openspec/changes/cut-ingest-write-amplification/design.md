@@ -86,6 +86,26 @@ can drift, so it becomes a test in `internal/jobhash` rather than a comment — 
 already has precedent for exactly this (`TestOfRow_CarriesEveryFieldTheHashReads` exists
 because the same mapping had already drifted once).
 
+### A dictionary change no longer rides in on the next crawl
+
+`UpsertJobParams` carries 26 fields; `jobhash.Of` reads 19. Three derived columns the upsert
+writes are outside the fingerprint: `cities`, `is_tech`, `english_level`. Their *inputs*
+(`location`, `title`, `description`) are all hashed, so equal `content_hash` implies equal
+derived values — **given the same dictionary**. The dictionary is an implicit input the
+fingerprint cannot see.
+
+So a dictionary edit (a city added to the GeoNames set, a term added to the non-tech set)
+stops propagating to unchanged rows as a side effect of re-crawling them. This is a real
+change to an operational contract and is accepted rather than worked around: including a
+dictionary version in the hash would invalidate the whole catalogue on every dictionary
+edit, which is the opposite of what this change is for.
+
+The reconciler already exists and is the documented mechanism — `cmd/backfill-derive`
+re-derives exactly this set (`cities`, `is_tech`, `english_level`, `role_fingerprint`,
+slugs) in one keyset pass and already compares before writing, so it is cheap on a
+catalogue where little moved. What changes is that running it after a dictionary edit
+becomes required rather than merely faster than waiting.
+
 ### Only `UpsertJob`'s company CTE is guarded
 
 Three queries carry a `company_upsert` CTE. `UpsertManualJob` and `UpdateManualJob` fire

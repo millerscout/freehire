@@ -105,11 +105,23 @@ This guarantee SHALL be enforced by a test rather than by comment, so a field la
 to a derived column but not to the fingerprint fails at build time instead of silently
 serving a stale value.
 
+The guarantee covers the posting's own fields, not the dictionaries a derivation consults.
+A dictionary is an implicit input the fingerprint cannot observe, so a dictionary edit SHALL
+NOT be expected to reach unchanged rows through re-crawling them; the deterministic-column
+backfill remains the mechanism that propagates it.
+
 #### Scenario: A field added to the role fingerprint but not the content hash
 
 - **WHEN** the role-identity fingerprint is computed from an input the content fingerprint
   does not read
 - **THEN** the test asserting the subset relation fails
+
+#### Scenario: A dictionary edit does not reach an unchanged posting by crawling
+
+- **WHEN** a facet dictionary gains a term that would change a derived column of a posting
+  whose own content has not changed
+- **THEN** re-crawling that posting leaves the derived column as it was, and the
+  deterministic-column backfill is what updates it
 
 ### Requirement: The reach of the cheap write path is observable per provider
 
