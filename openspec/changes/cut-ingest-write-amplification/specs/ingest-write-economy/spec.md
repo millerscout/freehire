@@ -2,10 +2,17 @@
 
 ### Requirement: An unchanged re-ingest writes only the liveness timestamp
 
-When a crawl re-sees an open posting whose indexed content fingerprint (`content_hash`)
-matches the stored one, the ingest write path SHALL refresh `last_seen_at` and SHALL write
+When a crawl re-sees an open posting that matches the stored row on every column the write
+would otherwise change, the ingest write path SHALL refresh `last_seen_at` and SHALL write
 no other column of that row. It SHALL NOT rewrite the description, the derived facet
 arrays, the fingerprints, or any bookkeeping column beyond the liveness timestamp.
+
+The match SHALL be decided by a key that covers every column the full write would set. The
+indexed content fingerprint (`content_hash`) alone does NOT: `cities` is written by the
+upsert and is not among the fingerprint's inputs, because a caller's structured city list
+overrides the location-derived one and can therefore move while every fingerprinted field
+stands still. The key SHALL carry `cities` alongside the fingerprint, and a column later
+added outside the fingerprint SHALL either join it or join the key.
 
 The refresh SHALL write no column that any index covers, so the update stays eligible for a
 heap-only tuple and maintains no index.
@@ -20,6 +27,13 @@ lookup — continues to skip it for exactly the reason it skips it today.
   stored row
 - **THEN** the row's `last_seen_at` advances, every other column of the row is unchanged,
   and the write reports neither inserted nor changed
+
+#### Scenario: A structured city list moves while the fingerprint stands still
+
+- **WHEN** a re-ingested posting carries a different structured city list but is otherwise
+  identical, so its `content_hash` is unchanged
+- **THEN** the full write path runs and stores the new `cities`, rather than the liveness
+  refresh skipping the row
 
 #### Scenario: A changed posting takes the full write
 

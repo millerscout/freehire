@@ -3,24 +3,26 @@
 - [x] 1.1 Add a test in `internal/jobhash` asserting every input `RoleFingerprint` reads is
       also an input `jobhash.Of` reads, so a fingerprint can never go stale behind a matching
       `content_hash`. Follow the shape of the existing `TestOfRow_CarriesEveryFieldTheHashReads`.
-- [ ] 1.2 The same guard for the deterministic facets, which the cheap path also skips: a test
-      asserting that if mutating a `jobderive.Input` field moves any `Derived` value, that field
-      is also a `jobhash.Of` input. Three `Input` fields are known not to be hashed — `Source`
-      and `ExternalID`, safe because `RefreshUnchangedJob` matches a row BY them so they cannot
-      move, and `Cities`, which is not safe. Carry the safe two as named, reasoned exemptions the
-      test states rather than a blanket allowance, and report what `Cities` turns out to be: if a
-      structured-source city list can change while every hashed field stays put, the cheap path
-      must not skip that row. Resolve it here — by hashing the field, or by narrowing the
-      predicate — rather than deferring it into the write path.
+- [x] 1.2 The same guard for every other column the cheap path skips: a test walking
+      `jobderive.Input` through the real composition (`job.New` → `Fields().UpsertParams()`) and
+      failing when a mutation moves any written column without moving the cheap path's match
+      key. Outcome: `Cities` was the only gap of the fourteen — `Source` and `ExternalID` needed
+      no exemption, since both move `PublicSlug`, which is hashed. Resolved by putting `cities`
+      in the match key rather than in `jobhash.Of`: hashing it would change every stored hash at
+      once and make the first crawl after deploy rewrite and re-index the whole catalogue. The
+      test now states the key and is the authority on it, so a later unhashed derived column
+      fails there. See design.md, "The match key is `content_hash` AND `cities`".
 
 ## 2. The cheap write
 
 - [ ] 2.1 Add `RefreshUnchangedJob` to `internal/db/queries/jobs.sql`: `UPDATE jobs SET
-      last_seen_at = now()` matched on `(source, external_id, content_hash)` and guarded by
-      `closed_at IS NULL`, returning the row. Run `make sqlc`.
+      last_seen_at = now()` matched on `(source, external_id, content_hash, cities)` and guarded
+      by `closed_at IS NULL`, returning the row. `cities` is in the key because task 1.2 proved
+      it is the one written column the content hash does not cover; the query comment names
+      TestUpsertParams_CheapWriteMatchKeyCoversEveryColumnItWrites as its guard. Run `make sqlc`.
 - [ ] 2.2 Integration test (`internal/db`, `//go:build integration`): the query advances
       `last_seen_at`, leaves every other column including `updated_at` untouched, and returns
-      no row for a closed posting or a mismatched hash.
+      no row for a closed posting, a mismatched hash, or a mismatched `cities`.
 
 ## 3. The ingest seam
 

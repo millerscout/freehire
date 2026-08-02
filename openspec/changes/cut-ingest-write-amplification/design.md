@@ -35,10 +35,35 @@ Two facts constrain every option below:
 
 ## Decisions
 
+### The match key is `content_hash` AND `cities`, not the hash alone
+
+The obvious key is the content fingerprint, and it is not sufficient. `UpsertJobParams`
+carries one column the upsert writes that `jobhash.Of` does not read: `cities`. A caller's
+structured city list overrides the location-derived one (`jobderive.Derive`), so it can move
+while every fingerprinted field stands still — and the cheap path would then skip a row whose
+`cities` really did change.
+
+Folding `cities` into `Of` was the alternative and is disqualified by its one-time cost:
+every stored `content_hash` would change at once, so the first crawl after deploy would
+report `changed` for all 5.6M rows, rewriting each and re-pushing the whole catalogue to
+Meilisearch — the write storm this change exists to remove, plus it would drown the
+before/after measurement the rollout depends on. Carrying `cities` in the predicate costs one
+array comparison on a row already fetched by index, no migration, and no invalidation.
+
+`TestUpsertParams_CheapWriteMatchKeyCoversEveryColumnItWrites` (`internal/job`) is the
+authority here: it walks `jobderive.Input` through the real composition and fails if any
+mutation moves a written column without moving the key. A derived column added later outside
+the fingerprint fails there, and the fix is the same fork — hash it, or widen the key.
+
+The ingest path does not currently supply structured cities (`normalizeJob` leaves
+`Input.Cities` empty), so the hole is unreachable today. That is an accident of one
+unpopulated field, not a design property, which is exactly why the key carries `cities`
+rather than a comment saying it need not.
+
 ### The unchanged test lives in SQL, not in Go
 
-`RefreshUnchangedJob` matches on `(source, external_id, content_hash)` and returns the row,
-or nothing. The caller branches on `pgx.ErrNoRows`.
+`RefreshUnchangedJob` matches on `(source, external_id, content_hash, cities)` and returns
+the row, or nothing. The caller branches on `pgx.ErrNoRows`.
 
 *Alternative considered:* read the stored hash into Go first, then choose a statement. That
 costs a guaranteed extra round trip on the hot path and opens a window between the read and

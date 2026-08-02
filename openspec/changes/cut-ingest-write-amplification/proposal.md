@@ -14,8 +14,9 @@ is read, the row has been rewritten.
 ## What Changes
 
 - Add a `RefreshUnchangedJob` query: a narrow `UPDATE jobs SET last_seen_at = now()` matched
-  on `(source, external_id, content_hash)` and guarded by `closed_at IS NULL`. It writes no
-  indexed column, so the update is HOT-eligible and maintains no index.
+  on `(source, external_id, content_hash, cities)` and guarded by `closed_at IS NULL`. It
+  writes no indexed column, so the update is HOT-eligible and maintains no index. `cities` is
+  in the key because it is the one written column `jobhash.Of` does not read.
 - `cmd/ingest`'s private `save` tries that query first and falls back to `UpsertJob` only
   when it matches nothing. The rest of `save` is unchanged — the role-cluster lookup and the
   index push are already gated on `Inserted`/`Changed`, which the cheap branch reports false.
