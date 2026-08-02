@@ -61,15 +61,15 @@
 
 ## 6. Make the reach observable
 
-- [ ] 6.1 Count cheap-path versus full-path writes per ingest run and log the pair once at
+- [x] 6.1 Count cheap-path versus full-path writes per ingest run and log the pair once at
       run end, attributed to the provider. Wire the counter through the existing run summary
       rather than adding a parallel reporting path.
-- [ ] 6.2 Test: a run that re-saw only unchanged postings reports a full cheap-path share; a
+- [x] 6.2 Test: a run that re-saw only unchanged postings reports a full cheap-path share; a
       run whose postings all changed reports zero, rather than reporting nothing.
 
 ## 7. Storage parameters
 
-- [ ] 7.1 New migration setting `fillfactor = 90` and `autovacuum_vacuum_scale_factor = 0.02`
+- [x] 7.1 New migration setting `fillfactor = 90` and `autovacuum_vacuum_scale_factor = 0.02`
       on `jobs`, in its own file so it deploys separately. Confirm the next free migration
       number against prod, not just against the repo.
 

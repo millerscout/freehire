@@ -40,6 +40,7 @@ type dbStore struct {
 	targetVersion int32
 	indexer       jobIndexer
 	crawled       *crawledSet
+	tally         *writeTally
 }
 
 // dbStore is the only non-test implementation of pipeline.Store, and it is expected to carry
@@ -56,8 +57,15 @@ var (
 	_ pipeline.SeenLookup = (*dbStore)(nil)
 )
 
-func newDBStore(pool *pgxpool.Pool, targetVersion int, indexer jobIndexer, crawled *crawledSet) *dbStore {
-	return &dbStore{pool: pool, q: db.New(pool), targetVersion: int32(targetVersion), indexer: indexer, crawled: crawled}
+func newDBStore(pool *pgxpool.Pool, targetVersion int, indexer jobIndexer, crawled *crawledSet, tally *writeTally) *dbStore {
+	return &dbStore{
+		pool:          pool,
+		q:             db.New(pool),
+		targetVersion: int32(targetVersion),
+		indexer:       indexer,
+		crawled:       crawled,
+		tally:         tally,
+	}
 }
 
 // written is what save needs back from whichever of the two writes ran, so the rest of the
@@ -148,6 +156,10 @@ func needsIndex(w written) bool {
 // rarer than the fan-out, and no worse off than before this existed.
 //
 // A row that already carries a marker knows its own answer and is not re-asked.
+// tookCheapWrite reports which of the two writes produced this. The narrow write is the only
+// one that carries no row, so this is exact rather than a heuristic.
+func (w written) tookCheapWrite() bool { return w.row == nil }
+
 func clustersByRole(w written) bool {
 	return w.inserted && !w.duplicateOf.Valid
 }
@@ -262,6 +274,11 @@ func (s *dbStore) save(ctx context.Context, j job.Job, form *applyform.Form) err
 	if s.crawled != nil {
 		s.crawled.record(saved.source, saved.companySlug)
 	}
+
+	// Which write this posting took, counted after the commit so a rolled-back attempt is not
+	// reported as a saving. The run-end share is the only thing that would show a provider whose
+	// rows never match the cheap key — see writeTally.
+	s.tally.record(saved.source, saved.tookCheapWrite())
 
 	// Best-effort incremental indexing of the now-committed row: only when the
 	// write inserted or changed indexed content, and only if an indexer is wired.

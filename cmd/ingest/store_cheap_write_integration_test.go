@@ -72,8 +72,9 @@ func TestSave_UnchangedRecrawlWritesOnlyLiveness(t *testing.T) {
 	ctx := context.Background()
 	pusher := &fakePusher{}
 	crawled := newCrawledSet()
+	tally := newWriteTally()
 	// chunkSize 1 flushes on every Add, so a push is observable without a Flush.
-	store := newDBStore(pool, 1, newBatchIndexer(pusher.push, 1), crawled)
+	store := newDBStore(pool, 1, newBatchIndexer(pusher.push, 1), crawled, tally)
 	posting := cheapPosting("acme:cheap-1", "Backend Engineer")
 
 	if err := store.Save(ctx, posting); err != nil {
@@ -116,6 +117,11 @@ func TestSave_UnchangedRecrawlWritesOnlyLiveness(t *testing.T) {
 	if !enrichmentQueued(t, pool, before.ID) {
 		t.Error("enrichment not queued after the re-crawl, want the enqueue to still run")
 	}
+	// The run must be able to SAY the cheap path was reached — one insert, then one cheap
+	// refresh. Without this the share is assumed rather than measured.
+	if got, want := tally.summary(), "lever cheap=1/2 (50%)"; got != want {
+		t.Errorf("tally = %q, want %q", got, want)
+	}
 }
 
 // The regression guard for RefreshUnchangedJob's `closed_at IS NULL`: a posting that was closed
@@ -125,7 +131,7 @@ func TestSave_UnchangedRecrawlWritesOnlyLiveness(t *testing.T) {
 func TestSave_ClosedPostingReopensOnUnchangedRecrawl(t *testing.T) {
 	pool := testdb.Pool(t)
 	ctx := context.Background()
-	store := newDBStore(pool, 1, nil, nil)
+	store := newDBStore(pool, 1, nil, nil, nil)
 	posting := cheapPosting("acme:cheap-2", "Platform Engineer")
 
 	if err := store.Save(ctx, posting); err != nil {
@@ -165,7 +171,7 @@ func TestSave_ClosedPostingReopensOnUnchangedRecrawl(t *testing.T) {
 func TestSaveWithApplyForm_UnchangedRecrawlStillWritesTheForm(t *testing.T) {
 	pool := testdb.Pool(t)
 	ctx := context.Background()
-	store := newDBStore(pool, 1, nil, nil)
+	store := newDBStore(pool, 1, nil, nil, nil)
 	posting := cheapPosting("acme:cheap-3", "Data Engineer")
 
 	first := applyform.Form{Provider: "lever", Fields: []applyform.Field{{ID: "1", Label: "Old question", RawType: "string"}}}

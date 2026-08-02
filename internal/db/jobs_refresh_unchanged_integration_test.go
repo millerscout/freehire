@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -190,5 +191,27 @@ func TestRefreshUnchangedJobMatchesNothingWhenTheRowWouldChange(t *testing.T) {
 				t.Errorf("err = %v, want pgx.ErrNoRows so the caller falls through to UpsertJob", err)
 			}
 		})
+	}
+}
+
+// The cheap write can only stay heap-only if jobs has room on a page for the new tuple version,
+// which is what migration 0073's fillfactor buys. A migration present in the repo but not
+// applied to the schema is invisible otherwise — the query still works, it just quietly
+// maintains all 21 indexes on every refresh.
+func TestJobsCarriesTheWriteStorageParameters(t *testing.T) {
+	pool := startPostgres(t)
+	ctx := context.Background()
+
+	var opts []string
+	if err := pool.QueryRow(ctx,
+		`SELECT reloptions FROM pg_class WHERE relname = 'jobs' AND relkind = 'r'`).Scan(&opts); err != nil {
+		t.Fatalf("read jobs reloptions: %v", err)
+	}
+
+	for _, want := range []string{"fillfactor=90", "autovacuum_vacuum_scale_factor=0.02"} {
+		if !slices.Contains(opts, want) {
+			t.Errorf("jobs reloptions = %v, missing %q — migration 0073 did not reach this schema",
+				opts, want)
+		}
 	}
 }
