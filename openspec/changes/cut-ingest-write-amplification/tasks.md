@@ -79,10 +79,19 @@
 
 ## 8. Verify
 
-- [ ] 8.1 `go build ./... && go vet ./... && go test ./...`, then
+- [x] 8.1 `go build ./... && go vet ./... && go test ./...`, then
       `go vet -tags=integration ./...` and `go test -tags=integration ./internal/db/ ./cmd/ingest/`.
-- [ ] 8.2 Snapshot `pg_stat_user_tables` for `jobs` and `companies` on prod and record the
+      All pass. NOTE, pre-existing and NOT fixed here: running several container-using packages
+      in one `go test` invocation is flaky on a loaded machine — roughly one run in three dies
+      with `clone hire_template: … connection reset by peer` in unrelated tests (`ghost_*`), and
+      `-p 1` is stable. The harness closes each pool via `t.Cleanup`, so tests do not accumulate
+      connections; this is concurrent testcontainer startup, not test count. Per-package runs —
+      the form CLAUDE.md documents — are reliable.
+- [x] 8.2 Snapshot `pg_stat_user_tables` for `jobs` and `companies` on prod and record the
       numbers in the change before releasing, so the post-release comparison has a baseline.
-- [ ] 8.3 Confirm on prod (`\d jobs`) that no index covers `last_seen_at`. The whole HOT premise
+      Recorded in `baseline.md` (2026-08-02T21:11:43Z).
+- [x] 8.3 Confirm on prod (`\d jobs`) that no index covers `last_seen_at`. The whole HOT premise
       rests on it, and git is not authoritative: `migrations/0043_jobs_user_fk_idx.sql` records
-      that its two indexes were applied by hand with `CREATE INDEX CONCURRENTLY`.
+      that its two indexes were applied by hand with `CREATE INDEX CONCURRENTLY`. Confirmed:
+      21 indexes, matching git exactly, none referencing `last_seen_at` as a key column or in a
+      partial predicate. See `baseline.md`.
