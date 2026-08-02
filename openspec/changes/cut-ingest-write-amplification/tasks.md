@@ -15,12 +15,12 @@
 
 ## 2. The cheap write
 
-- [ ] 2.1 Add `RefreshUnchangedJob` to `internal/db/queries/jobs.sql`: `UPDATE jobs SET
+- [x] 2.1 Add `RefreshUnchangedJob` to `internal/db/queries/jobs.sql`: `UPDATE jobs SET
       last_seen_at = now()` matched on `(source, external_id, content_hash, cities)` and guarded
       by `closed_at IS NULL`, returning the row. `cities` is in the key because task 1.2 proved
       it is the one written column the content hash does not cover; the query comment names
       TestUpsertParams_CheapWriteMatchKeyCoversEveryColumnItWrites as its guard. Run `make sqlc`.
-- [ ] 2.2 Integration test (`internal/db`, `//go:build integration`): the query advances
+- [x] 2.2 Integration test (`internal/db`, `//go:build integration`): the query advances
       `last_seen_at`, leaves every other column including `updated_at` untouched, and returns
       no row for a closed posting, a mismatched hash, or a mismatched `cities`.
 

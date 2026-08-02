@@ -285,6 +285,44 @@ RETURNING sqlc.embed(jobs),
     NOT COALESCE((SELECT existed FROM existing), false) AS inserted,
     ((SELECT old_hash FROM existing) IS DISTINCT FROM sqlc.arg(content_hash)) AS changed;
 
+-- name: RefreshUnchangedJob :one
+-- The cheap half of the ingest write path, tried before UpsertJob: a crawl that re-sees a
+-- posting identical to the stored row refreshes its liveness and writes NOTHING else. Matching
+-- nothing (pgx.ErrNoRows) is the signal to run the full upsert — which is also what a brand-new
+-- posting gets, since it too matches no row, and both want the same statement.
+--
+-- Why this exists: UpsertJob's DO UPDATE carries no WHERE, so a re-ingest rewrites the whole
+-- tuple — re-TOASTing a ~2.5KB description and touching every index on the table — to move a
+-- timestamp.
+--
+-- last_seen_at is the ONLY column written, and it is deliberately in no index, so the update is
+-- heap-only and maintains none of them. updated_at is deliberately NOT stamped: it thereby comes
+-- to mean "content last changed" rather than "last crawled", which is what makes `reindex
+-- --since` incremental instead of degrading into a full swap after every crawl.
+--
+-- The match key is (content_hash, cities), not the hash alone. cities is the one column the
+-- upsert writes that jobhash.Of does not read — a caller's structured city list overrides the
+-- location-derived one, so it can move while every hashed field stands still. Folding it into
+-- the hash instead would change every stored content_hash at once and make the first crawl after
+-- deploy rewrite and re-index the whole catalogue. Whether the key still covers every written
+-- column is enforced by TestUpsertParams_CheapWriteMatchKeyCoversEveryColumnItWrites
+-- (internal/job); add a derived column outside the hash and it fails there.
+--
+-- A NULL stored content_hash (a legacy row predating the column) compares unequal and so takes
+-- the full path, which is right: nothing is known about what it holds.
+--
+-- closed_at IS NULL is correctness, not economy. A closed posting that reappears with identical
+-- content must reach UpsertJob, which is what clears closed_at and resets the strike count.
+-- Refreshing its liveness here would leave it closed while the unseen sweep kept seeing it.
+UPDATE jobs
+SET last_seen_at = now()
+WHERE source = sqlc.arg(source)
+  AND external_id = sqlc.arg(external_id)
+  AND content_hash = sqlc.arg(content_hash)
+  AND cities = COALESCE(sqlc.arg(cities)::text[], '{}')
+  AND closed_at IS NULL
+RETURNING sqlc.embed(jobs);
+
 -- name: RoleClusterCount :one
 -- The job-reality repost/mass-posting counts for one role cluster: how many postings
 -- of the same role (by role_fingerprint within a company) exist of any status

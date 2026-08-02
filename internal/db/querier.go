@@ -2093,6 +2093,35 @@ type Querier interface {
 	// fall back to the distinct union of enrichment.company_size over open jobs (the csize
 	// CTE). Computed once so the SET and the IS DISTINCT FROM guard share one value.
 	RefreshCompanyFacets(ctx context.Context) (int64, error)
+	// The cheap half of the ingest write path, tried before UpsertJob: a crawl that re-sees a
+	// posting identical to the stored row refreshes its liveness and writes NOTHING else. Matching
+	// nothing (pgx.ErrNoRows) is the signal to run the full upsert — which is also what a brand-new
+	// posting gets, since it too matches no row, and both want the same statement.
+	//
+	// Why this exists: UpsertJob's DO UPDATE carries no WHERE, so a re-ingest rewrites the whole
+	// tuple — re-TOASTing a ~2.5KB description and touching every index on the table — to move a
+	// timestamp.
+	//
+	// last_seen_at is the ONLY column written, and it is deliberately in no index, so the update is
+	// heap-only and maintains none of them. updated_at is deliberately NOT stamped: it thereby comes
+	// to mean "content last changed" rather than "last crawled", which is what makes `reindex
+	// --since` incremental instead of degrading into a full swap after every crawl.
+	//
+	// The match key is (content_hash, cities), not the hash alone. cities is the one column the
+	// upsert writes that jobhash.Of does not read — a caller's structured city list overrides the
+	// location-derived one, so it can move while every hashed field stands still. Folding it into
+	// the hash instead would change every stored content_hash at once and make the first crawl after
+	// deploy rewrite and re-index the whole catalogue. Whether the key still covers every written
+	// column is enforced by TestUpsertParams_CheapWriteMatchKeyCoversEveryColumnItWrites
+	// (internal/job); add a derived column outside the hash and it fails there.
+	//
+	// A NULL stored content_hash (a legacy row predating the column) compares unequal and so takes
+	// the full path, which is right: nothing is known about what it holds.
+	//
+	// closed_at IS NULL is correctness, not economy. A closed posting that reappears with identical
+	// content must reach UpsertJob, which is what clears closed_at and resets the strike count.
+	// Refreshing its liveness here would leave it closed while the unseen sweep kept seeing it.
+	RefreshUnchangedJob(ctx context.Context, arg RefreshUnchangedJobParams) (RefreshUnchangedJobRow, error)
 	// Dismiss a suggestion without linking.
 	RejectEmailLink(ctx context.Context, arg RejectEmailLinkParams) (int64, error)
 	// Release the lease on a subscription's claimed jobs without counting an attempt,

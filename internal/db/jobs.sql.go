@@ -1776,6 +1776,121 @@ func (q *Queries) RecomputeRoleDuplicatesForCompany(ctx context.Context, company
 	return result.RowsAffected(), nil
 }
 
+const refreshUnchangedJob = `-- name: RefreshUnchangedJob :one
+UPDATE jobs
+SET last_seen_at = now()
+WHERE source = $1
+  AND external_id = $2
+  AND content_hash = $3
+  AND cities = COALESCE($4::text[], '{}')
+  AND closed_at IS NULL
+RETURNING jobs.id, jobs.source, jobs.external_id, jobs.url, jobs.title, jobs.company, jobs.location, jobs.remote, jobs.description, jobs.posted_at, jobs.created_at, jobs.updated_at, jobs.company_slug, jobs.enrichment, jobs.enriched_at, jobs.enrichment_version, jobs.public_slug, jobs.last_seen_at, jobs.closed_at, jobs.countries, jobs.regions, jobs.work_mode, jobs.liveness_strikes, jobs.skills, jobs.seniority, jobs.category, jobs.created_by, jobs.updated_by, jobs.posting_language, jobs.employment_type, jobs.education_level, jobs.experience_years_min, jobs.collections, jobs.content_hash, jobs.english_level, jobs.cities, jobs.view_count, jobs.applied_count, jobs.role_fingerprint, jobs.semantic_embedded_model, jobs.semantic_embedded_hash, jobs.duplicate_of, jobs.is_tech, jobs.semantic_embedding, jobs.salary_min_manual, jobs.salary_max_manual, jobs.salary_currency_manual, jobs.salary_period_manual, jobs.upvote_count, jobs.downvote_count, jobs.ats_absent_at, jobs.closed_reason
+`
+
+type RefreshUnchangedJobParams struct {
+	Source      string      `json:"source"`
+	ExternalID  string      `json:"external_id"`
+	ContentHash pgtype.Text `json:"content_hash"`
+	Cities      []string    `json:"cities"`
+}
+
+type RefreshUnchangedJobRow struct {
+	Job Job `json:"job"`
+}
+
+// The cheap half of the ingest write path, tried before UpsertJob: a crawl that re-sees a
+// posting identical to the stored row refreshes its liveness and writes NOTHING else. Matching
+// nothing (pgx.ErrNoRows) is the signal to run the full upsert — which is also what a brand-new
+// posting gets, since it too matches no row, and both want the same statement.
+//
+// Why this exists: UpsertJob's DO UPDATE carries no WHERE, so a re-ingest rewrites the whole
+// tuple — re-TOASTing a ~2.5KB description and touching every index on the table — to move a
+// timestamp.
+//
+// last_seen_at is the ONLY column written, and it is deliberately in no index, so the update is
+// heap-only and maintains none of them. updated_at is deliberately NOT stamped: it thereby comes
+// to mean "content last changed" rather than "last crawled", which is what makes `reindex
+// --since` incremental instead of degrading into a full swap after every crawl.
+//
+// The match key is (content_hash, cities), not the hash alone. cities is the one column the
+// upsert writes that jobhash.Of does not read — a caller's structured city list overrides the
+// location-derived one, so it can move while every hashed field stands still. Folding it into
+// the hash instead would change every stored content_hash at once and make the first crawl after
+// deploy rewrite and re-index the whole catalogue. Whether the key still covers every written
+// column is enforced by TestUpsertParams_CheapWriteMatchKeyCoversEveryColumnItWrites
+// (internal/job); add a derived column outside the hash and it fails there.
+//
+// A NULL stored content_hash (a legacy row predating the column) compares unequal and so takes
+// the full path, which is right: nothing is known about what it holds.
+//
+// closed_at IS NULL is correctness, not economy. A closed posting that reappears with identical
+// content must reach UpsertJob, which is what clears closed_at and resets the strike count.
+// Refreshing its liveness here would leave it closed while the unseen sweep kept seeing it.
+func (q *Queries) RefreshUnchangedJob(ctx context.Context, arg RefreshUnchangedJobParams) (RefreshUnchangedJobRow, error) {
+	row := q.db.QueryRow(ctx, refreshUnchangedJob,
+		arg.Source,
+		arg.ExternalID,
+		arg.ContentHash,
+		arg.Cities,
+	)
+	var i RefreshUnchangedJobRow
+	err := row.Scan(
+		&i.Job.ID,
+		&i.Job.Source,
+		&i.Job.ExternalID,
+		&i.Job.URL,
+		&i.Job.Title,
+		&i.Job.Company,
+		&i.Job.Location,
+		&i.Job.Remote,
+		&i.Job.Description,
+		&i.Job.PostedAt,
+		&i.Job.CreatedAt,
+		&i.Job.UpdatedAt,
+		&i.Job.CompanySlug,
+		&i.Job.Enrichment,
+		&i.Job.EnrichedAt,
+		&i.Job.EnrichmentVersion,
+		&i.Job.PublicSlug,
+		&i.Job.LastSeenAt,
+		&i.Job.ClosedAt,
+		&i.Job.Countries,
+		&i.Job.Regions,
+		&i.Job.WorkMode,
+		&i.Job.LivenessStrikes,
+		&i.Job.Skills,
+		&i.Job.Seniority,
+		&i.Job.Category,
+		&i.Job.CreatedBy,
+		&i.Job.UpdatedBy,
+		&i.Job.PostingLanguage,
+		&i.Job.EmploymentType,
+		&i.Job.EducationLevel,
+		&i.Job.ExperienceYearsMin,
+		&i.Job.Collections,
+		&i.Job.ContentHash,
+		&i.Job.EnglishLevel,
+		&i.Job.Cities,
+		&i.Job.ViewCount,
+		&i.Job.AppliedCount,
+		&i.Job.RoleFingerprint,
+		&i.Job.SemanticEmbeddedModel,
+		&i.Job.SemanticEmbeddedHash,
+		&i.Job.DuplicateOf,
+		&i.Job.IsTech,
+		&i.Job.SemanticEmbedding,
+		&i.Job.SalaryMinManual,
+		&i.Job.SalaryMaxManual,
+		&i.Job.SalaryCurrencyManual,
+		&i.Job.SalaryPeriodManual,
+		&i.Job.UpvoteCount,
+		&i.Job.DownvoteCount,
+		&i.Job.AtsAbsentAt,
+		&i.Job.ClosedReason,
+	)
+	return i, err
+}
+
 const resetLivenessStrikes = `-- name: ResetLivenessStrikes :exec
 UPDATE jobs
 SET liveness_strikes = 0
