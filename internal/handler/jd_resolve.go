@@ -1,11 +1,16 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 
+	"github.com/strelov1/freehire/internal/auth"
 	"github.com/strelov1/freehire/internal/jdresolve"
 )
 
@@ -20,9 +25,41 @@ func newJDResolveHandlers(resolver *jdresolve.Resolver) *jdResolveHandlers {
 }
 
 func (h *jdResolveHandlers) register(api fiber.Router, mw middleware) {
-	// outboundFetch: the url branch makes the server fetch a caller-supplied page, the
-	// same budget /jobs/resolve's contribution flow shares (see handler.go).
-	api.Post("/me/jd/resolve", mw.cookie, mw.outboundFetch, h.Resolve)
+	api.Post("/me/jd/resolve", mw.cookie, jdURLLimiter(), h.Resolve)
+}
+
+// jdURLLimiterPerHour bounds how many outbound-fetching url requests one user may submit
+// to this endpoint per hour — sized the same as contributionsPerHour since the underlying
+// risk (an unbounded endpoint fetching a caller-supplied URL is an outbound-fetch amplifier
+// and a timing oracle for public hosts) is identical. A DEDICATED limiter, not
+// contributionLimiter itself: job_slug and text requests make no outbound fetch at all, so
+// sharing /jobs/resolve's counter would throttle a tailoring session that never once
+// touched the network, and vice versa.
+const jdURLLimiterPerHour = contributionsPerHour
+
+// jdURLLimiter throttles only the url branch: Next reads the already-buffered body (cheap,
+// and it does not consume it — c.BodyParser in Resolve reads it again the normal way) and
+// skips rate-limiting entirely when it names no url, so a job_slug or pasted-text request
+// never spends this budget. A body that fails to parse here is not limited either; Resolve's
+// own BodyParser call rejects it as a 400 right after, unmetered.
+func jdURLLimiter() fiber.Handler {
+	return limiter.New(limiter.Config{
+		Max:        jdURLLimiterPerHour,
+		Expiration: time.Hour,
+		Next: func(c *fiber.Ctx) bool {
+			var in jdResolveRequest
+			if err := json.Unmarshal(c.Body(), &in); err != nil {
+				return true
+			}
+			return strings.TrimSpace(in.URL) == ""
+		},
+		KeyGenerator: func(c *fiber.Ctx) string {
+			if id, ok := auth.UserID(c); ok {
+				return "user:" + strconv.FormatInt(id, 10)
+			}
+			return "ip:" + c.IP()
+		},
+	})
 }
 
 // jdResolveRequest is exactly one of JobSlug/URL/Text. Title/Company are optional hints

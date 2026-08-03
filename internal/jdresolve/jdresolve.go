@@ -101,7 +101,11 @@ func (r *Resolver) resolveSlug(ctx context.Context, slug string) (string, error)
 func (r *Resolver) resolveURL(ctx context.Context, userID int64, url string) (string, error) {
 	resolved, ok, err := r.importer.Resolve(ctx, url, linkimport.Board{})
 	if err != nil {
-		return "", fmt.Errorf("jdresolve: resolve url: %w", err)
+		// A fetch/parse failure here is caller input (an unreachable page, a timeout, a
+		// non-2xx response), not a server fault — the same distinction intake.go draws for
+		// the sibling contribution flow. Surfacing it as a 500 would mislabel routine bad
+		// URLs as internal errors and page on something that happens in ordinary use.
+		return "", fmt.Errorf("%w: %v", ErrUnreadableURL, err)
 	}
 	if !ok {
 		return "", ErrUnreadableURL

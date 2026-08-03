@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -47,6 +48,23 @@ func (c jdPageClient) GetHTMLResolved(_ context.Context, url string) (*html.Node
 
 func (c jdPageClient) GetJSON(_ context.Context, _ string, _ any) error { return nil }
 
+// failingPageClient simulates a network/fetch failure (timeout, DNS error, non-2xx) rather
+// than "the page carries no vacancy" — the distinction resolveURL must map to the same 422
+// as an unreadable page, not a 500.
+type failingPageClient struct{}
+
+func (failingPageClient) GetHTML(_ context.Context, _ string) (*html.Node, error) {
+	return nil, errFakeNetwork
+}
+
+func (failingPageClient) GetHTMLResolved(_ context.Context, _ string) (*html.Node, string, error) {
+	return nil, "", errFakeNetwork
+}
+
+func (failingPageClient) GetJSON(_ context.Context, _ string, _ any) error { return errFakeNetwork }
+
+var errFakeNetwork = errors.New("fake network failure")
+
 func TestJDResolveEndpoint(t *testing.T) {
 	pool := startPostgres(t)
 	ctx := context.Background()
@@ -75,7 +93,7 @@ func TestJDResolveEndpoint(t *testing.T) {
 
 	app := fiber.New(fiber.Config{ErrorHandler: RenderError})
 	cookieAuth := auth.RequireAuth(iss, testVersions)
-	app.Post("/api/v1/me/jd/resolve", cookieAuth, h.Resolve)
+	app.Post("/api/v1/me/jd/resolve", cookieAuth, jdURLLimiter(), h.Resolve)
 
 	post := func(t *testing.T, body map[string]string, withCookie bool) (*http.Response, map[string]any) {
 		t.Helper()
@@ -181,6 +199,53 @@ func TestJDResolveEndpoint(t *testing.T) {
 		defer resp.Body.Close()
 		if resp.StatusCode != fiber.StatusUnprocessableEntity {
 			t.Errorf("status = %d, want 422", resp.StatusCode)
+		}
+	})
+
+	t.Run("a network failure resolving the URL is a 422, not a 500", func(t *testing.T) {
+		failingIM := linkimport.New(pool, queries, nil, failingPageClient{}, nil, nil)
+		failingResolver := jdresolve.New(queries, failingIM, privatejob.NewWriter(queries))
+		failingH := newJDResolveHandlers(failingResolver)
+		failingApp := fiber.New(fiber.Config{ErrorHandler: RenderError})
+		failingApp.Post("/api/v1/me/jd/resolve", cookieAuth, failingH.Resolve)
+
+		raw, _ := json.Marshal(map[string]string{"url": "https://careers.mindera.test/unreachable"})
+		r := httptest.NewRequest(fiber.MethodPost, "/api/v1/me/jd/resolve", bytes.NewReader(raw))
+		r.Header.Set("Content-Type", "application/json")
+		r.AddCookie(&http.Cookie{Name: auth.CookieName, Value: cookie})
+		resp, err := failingApp.Test(r)
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != fiber.StatusUnprocessableEntity {
+			t.Errorf("status = %d, want 422 — a fetch failure is caller input, not a server fault", resp.StatusCode)
+		}
+	})
+
+	t.Run("job_slug and text requests never spend the url rate limit", func(t *testing.T) {
+		// jdURLLimiterPerHour (== contributionsPerHour, 20) would reject request #21 if
+		// job_slug/text shared the url branch's budget. None of these touch the network, so
+		// none should ever be limited.
+		for i := 0; i < jdURLLimiterPerHour+5; i++ {
+			resp, _ := post(t, map[string]string{"job_slug": seededSlug}, true)
+			if resp.StatusCode == fiber.StatusTooManyRequests {
+				t.Fatalf("request %d: got 429, want job_slug requests to never be url-rate-limited", i+1)
+			}
+		}
+	})
+
+	t.Run("url requests are still rate limited on their own budget", func(t *testing.T) {
+		var limited bool
+		for i := 0; i < jdURLLimiterPerHour+1; i++ {
+			resp, _ := post(t, map[string]string{"url": "https://careers.mindera.test/many"}, true)
+			if resp.StatusCode == fiber.StatusTooManyRequests {
+				limited = true
+				break
+			}
+		}
+		if !limited {
+			t.Errorf("%d url requests never hit 429, want the url branch's own budget enforced", jdURLLimiterPerHour+1)
 		}
 	})
 }
