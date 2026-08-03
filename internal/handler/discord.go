@@ -1,22 +1,25 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/strelov1/freehire/internal/contribution"
 	"github.com/strelov1/freehire/internal/db"
 	"github.com/strelov1/freehire/internal/discordbot"
 )
 
-// discordHandlers serves the Discord bot's linking surface: a deep-link-token
-// mint, the link status/unlink reads, and the inbound interaction webhook
-// (which fields the /link slash command; /contribute is wired by a later
-// task). All nil/empty when the bot is unconfigured — the linking endpoints
+// discordHandlers serves the Discord bot's linking and contribution surface: a
+// deep-link-token mint, the link status/unlink reads, and the inbound
+// interaction webhook (which fields the /link and /contribute slash
+// commands). All nil/empty when the bot is unconfigured — the linking endpoints
 // then report the feature off and the interaction webhook is inert. Discord
 // has no notion of a magic-link URL like Telegram's /start deep link, so
 // LinkDiscord hands the SPA a token to paste into /link instead. Unlike
@@ -25,9 +28,7 @@ import (
 // request body — see DiscordInteraction.
 type discordHandlers struct {
 	queries *db.Queries
-	// discordBot is unused by this task's handlers (no EditOriginalResponse call
-	// yet) but is wired here so the /contribute deferred-response flow can use it
-	// without another all-or-nothing config gate.
+	// discordBot edits the deferred /contribute reply once intake finishes.
 	discordBot *discordbot.Client
 	// discordLinks mints/verifies the /link deep-link token.
 	discordLinks *discordbot.DiscordLinkTokens
@@ -183,9 +184,9 @@ func (h *discordHandlers) DiscordInteraction(c *fiber.Ctx) error {
 }
 
 // dispatchCommand routes an APPLICATION_COMMAND interaction by command name.
-// "link" is handled inline; any other name — including "contribute", wired by
-// a later task — gets a generic not-yet-available reply rather than a panic on
-// an unrecognized shape.
+// "link" replies synchronously; "contribute" defers and finishes in the
+// background (see handleContributeCommand). Any other name gets a generic
+// not-yet-available reply rather than a panic on an unrecognized shape.
 func (h *discordHandlers) dispatchCommand(c *fiber.Ctx, interaction discordbot.Interaction) error {
 	if interaction.Data == nil {
 		return c.JSON(discordbot.EphemeralResponse("Sorry, that command wasn't understood."))
@@ -193,6 +194,8 @@ func (h *discordHandlers) dispatchCommand(c *fiber.Ctx, interaction discordbot.I
 	switch interaction.Data.Name {
 	case "link":
 		return h.handleLinkCommand(c, interaction)
+	case "contribute":
+		return h.handleContributeCommand(c, interaction)
 	default:
 		return c.JSON(discordbot.EphemeralResponse("This command isn't available yet."))
 	}
@@ -220,6 +223,65 @@ func (h *discordHandlers) handleLinkCommand(c *fiber.Ctx, interaction discordbot
 	}
 
 	return c.JSON(discordbot.EphemeralResponse("✅ Linked! You can now use /contribute here."))
+}
+
+// discordContribTimeout bounds the background intake work spawned from a /contribute
+// interaction — the catalog lookup, the import, the record, and the EditOriginalResponse
+// call — so a stuck goroutine cannot leak. Mirrors telegramContribTimeout (same value, same
+// rationale): the interaction has already been deferred, so this budget delays nobody, but
+// intake may now fetch a whole ATS board to read one vacancy.
+const discordContribTimeout = 60 * time.Second
+
+// handleContributeCommand replies immediately with a deferred response — Discord gives a
+// synchronous interaction reply only 3 seconds, and intake may take much longer — then
+// finishes the work in a background goroutine bounded by discordContribTimeout, editing the
+// original response with the outcome once it's known.
+func (h *discordHandlers) handleContributeCommand(c *fiber.Ctx, interaction discordbot.Interaction) error {
+	url := commandOption(interaction.Data, "url")
+	discordID, ok := interactionUserID(interaction)
+	go h.processDiscordContribution(interaction.Token, discordID, ok, url)
+	return c.JSON(discordbot.DeferredResponse())
+}
+
+// processDiscordContribution resolves the invoking Discord identity to a linked account,
+// submits the link, and edits the deferred reply with the outcome — on its own bounded
+// background context (the interaction has already been acknowledged by the deferred
+// response). An unlinked identity is told to link first; intakeService.Resolve is never
+// called in that branch — see the package's Global Constraints on no anonymous contribution.
+func (h *discordHandlers) processDiscordContribution(interactionToken string, discordID int64, ok bool, rawURL string) {
+	ctx, cancel := context.WithTimeout(context.Background(), discordContribTimeout)
+	defer cancel()
+
+	if !ok {
+		h.editOriginalResponse(ctx, interactionToken, "⚠️ Could not identify your Discord account.")
+		return
+	}
+
+	userID, err := h.queries.GetUserIDByDiscordID(ctx, discordID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		h.editOriginalResponse(ctx, interactionToken, "🔗 Link your freehire account first (Settings → Discord on the site), then run /contribute again.")
+		return
+	}
+	if err != nil {
+		log.Printf("discord: resolve discord_id=%d: %v", discordID, err)
+		return
+	}
+
+	out, err := h.intake.Resolve(ctx, userID, rawURL, contribution.SurfaceDiscord)
+	if err != nil {
+		log.Printf("discord: intake user=%d: %v", userID, err)
+		h.editOriginalResponse(ctx, interactionToken, "⚠️ Something went wrong. Please try again.")
+		return
+	}
+	h.editOriginalResponse(ctx, interactionToken, renderIntakeOutcome(out, h.frontendOrigin))
+}
+
+// editOriginalResponse edits the deferred interaction reply, logging (not surfacing) a send
+// failure — the caller has already returned to Discord, so there is nothing left to fail.
+func (h *discordHandlers) editOriginalResponse(ctx context.Context, interactionToken, content string) {
+	if err := h.discordBot.EditOriginalResponse(ctx, h.discordApplicationID, interactionToken, content); err != nil {
+		log.Printf("discord: edit original response: %v", err)
+	}
 }
 
 // commandOption reads a named string option from a command invocation, or ""
