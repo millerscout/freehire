@@ -1,18 +1,18 @@
 ## 1. Schema
 
-- [ ] 1.1 Add a new migration: `jobs.is_private boolean not null default false` (never edit an
+- [x] 1.1 Add a new migration: `jobs.is_private boolean not null default false` (never edit an
       applied migration file).
-- [ ] 1.2 Regenerate sqlc (`make sqlc`) so `db.Job` and relevant query params expose `IsPrivate`.
+- [x] 1.2 Regenerate sqlc (`make sqlc`) so `db.Job` and relevant query params expose `IsPrivate`.
 
 ## 2. Private job creation
 
-- [ ] 2.1 Add a synthetic `external_id` generator (fresh UUID per submission) for the private
+- [x] 2.1 Add a synthetic `external_id` generator (fresh UUID per submission) for the private
       path — never compared against the public `(source, external_id)` dedup space.
-- [ ] 2.2 Implement a private-job writer: given title/company/description (+ URL when present),
+- [x] 2.2 Implement a private-job writer: given title/company/description (+ URL when present),
       run `internal/jobderive.Derive` synchronously, insert a `jobs` row with
       `is_private = true`, `created_by = userID`, `source` = `"pasted"` (text) or `"weblink"`
       (URL), and do **not** enqueue it onto `enrichment_outbox`.
-- [ ] 2.3 Unit tests for the writer: facets populated from `Derive`, no `enrichment_outbox` row
+- [x] 2.3 Unit tests for the writer: facets populated from `Derive`, no `enrichment_outbox` row
       created, two calls (same or different user, same input) never collide on `external_id`.
 
 ## 3. URL/text resolution branching
