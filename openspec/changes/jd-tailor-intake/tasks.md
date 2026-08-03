@@ -31,11 +31,11 @@
 
 ## 4. Resolve endpoint
 
-- [ ] 4.1 Define request/response types and validation for `POST /api/v1/me/jd/resolve`: exactly
+- [x] 4.1 Define request/response types and validation for `POST /api/v1/me/jd/resolve`: exactly
       one of `job_slug` / `url` / `text` required, `text` non-empty when present.
-- [ ] 4.2 Implement the handler wiring the 3.x resolver behind `RequireAuth`, returning
+- [x] 4.2 Implement the handler wiring the 3.x resolver behind `RequireAuth`, returning
       `{job_slug}`.
-- [ ] 4.3 Handler tests: 200 + slug for each of the three input kinds; 400 for zero or multiple
+- [x] 4.3 Handler tests: 200 + slug for each of the three input kinds; 400 for zero or multiple
       inputs; 401 unauthenticated; 422 for an unreadable URL.
 
 ## 5. Visibility gating
