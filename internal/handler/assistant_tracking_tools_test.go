@@ -28,7 +28,7 @@ type trackingRepo struct {
 	listedFor     jobtracking.Filter
 }
 
-func (r *trackingRepo) JobIDBySlug(_ context.Context, slug string) (int64, error) {
+func (r *trackingRepo) JobIDBySlug(_ context.Context, slug string, _ int64) (int64, error) {
 	if slug != r.slug {
 		return 0, jobtracking.ErrJobNotFound
 	}

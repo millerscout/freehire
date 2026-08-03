@@ -8,6 +8,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -118,4 +119,86 @@ func TestSaveUnsaveEndpoints(t *testing.T) {
 			t.Errorf("status = %d, want 404", resp.StatusCode)
 		}
 	})
+}
+
+// TestTrackJobAndSaveJob_PrivateJobGate: a stranger cannot manufacture their own tracking
+// row against a private job (jd-tailor-intake) by slug alone — Track and Save both answer
+// 404, identical to an unknown slug, and no row is created. Its owner can track/save it
+// normally. This closes the chain a stranger could otherwise use to read a private job's
+// full content back through GET /me/tracking/:slug (GetTrackedApplication), which loads
+// whatever job a user_jobs/user_applications row names with no visibility check of its own.
+func TestTrackJobAndSaveJob_PrivateJobGate(t *testing.T) {
+	pool := startPostgres(t)
+	ctx := context.Background()
+
+	var owner, stranger int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (email) VALUES ('track-owner@example.test') RETURNING id`).Scan(&owner); err != nil {
+		t.Fatalf("seed owner: %v", err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (email) VALUES ('track-stranger@example.test') RETURNING id`).Scan(&stranger); err != nil {
+		t.Fatalf("seed stranger: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO jobs (source, external_id, url, title, public_slug, is_private, created_by)
+		 VALUES ('pasted', 'tr1', '', 'A private JD', 'track-private-job', true, $1)`, owner); err != nil {
+		t.Fatalf("seed private job: %v", err)
+	}
+
+	iss := auth.NewIssuer("test-secret", time.Hour)
+	ownerTok, _ := iss.Issue(owner, testTokenVersion)
+	strangerTok, _ := iss.Issue(stranger, testTokenVersion)
+
+	queries := db.New(pool)
+	h := &trackingHandlers{tracking: jobtracking.New(jobtracking.NewQueriesRepository(queries, pool))}
+	app := fiber.New(fiber.Config{ErrorHandler: RenderError})
+	g := auth.RequireAuth(iss, testVersions)
+	app.Patch("/api/v1/jobs/:slug/track", g, h.TrackJob)
+	app.Post("/api/v1/jobs/:slug/save", g, h.SaveJob)
+
+	track := func(tok string) *http.Response {
+		body, _ := json.Marshal(map[string]string{"stage": "applied"})
+		req := httptest.NewRequest(fiber.MethodPatch, "/api/v1/jobs/track-private-job/track", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok})
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("track: %v", err)
+		}
+		return resp
+	}
+	save := func(tok string) *http.Response {
+		req := httptest.NewRequest(fiber.MethodPost, "/api/v1/jobs/track-private-job/save", nil)
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok})
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("save: %v", err)
+		}
+		return resp
+	}
+	rowCount := func() int {
+		var n int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM user_jobs").Scan(&n); err != nil {
+			t.Fatalf("count user_jobs: %v", err)
+		}
+		return n
+	}
+
+	if resp := track(strangerTok); resp.StatusCode != fiber.StatusNotFound {
+		t.Errorf("stranger track = %d, want 404", resp.StatusCode)
+	}
+	if resp := save(strangerTok); resp.StatusCode != fiber.StatusNotFound {
+		t.Errorf("stranger save = %d, want 404", resp.StatusCode)
+	}
+	if n := rowCount(); n != 0 {
+		t.Fatalf("user_jobs rows after stranger attempts = %d, want 0 — no row must be manufacturable", n)
+	}
+
+	if resp := save(ownerTok); resp.StatusCode != fiber.StatusOK {
+		t.Errorf("owner save = %d, want 200", resp.StatusCode)
+	}
+	if n := rowCount(); n != 1 {
+		t.Errorf("user_jobs rows after owner save = %d, want 1", n)
+	}
 }
