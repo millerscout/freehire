@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"html"
 	"log"
 	"regexp"
 	"strings"
@@ -257,5 +258,12 @@ func (h *telegramHandlers) processTelegramContribution(chatID int64, rawURL stri
 		h.sendTelegram(ctx, chatID, "⚠️ Something went wrong. Please try again.")
 		return
 	}
-	h.sendTelegram(ctx, chatID, renderIntakeOutcome(out, h.frontendOrigin))
+	h.sendTelegram(ctx, chatID, renderIntakeOutcome(out, h.frontendOrigin, telegramEmphasize))
+}
+
+// telegramEmphasize renders emphasis as Telegram's HTML bold tag, matching the parse_mode:
+// "HTML" every outbound message is sent with (see telegramnotify.Client.SendMessage) — the
+// board name is escaped because it is untrusted text riding inside markup we control.
+func telegramEmphasize(s string) string {
+	return "<b>" + html.EscapeString(s) + "</b>"
 }

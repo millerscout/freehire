@@ -251,13 +251,14 @@ func TestDiscordInteraction_disabledReturns404(t *testing.T) {
 	}
 }
 
-// TestDiscordInteraction_contributeDeferred exercises /contribute's immediate reply: a
-// deferred response (type 5, no data payload), regardless of what the background goroutine
-// later does. The interaction carries no Member/User, so the spawned goroutine takes the
-// "could not identify" branch and never touches h.queries or h.intake (both nil on this
-// handler) — see TestNoAnonymousContribution_missingIdentityNeverReachesIntake for the same property
-// asserted directly against the dispatch code.
-func TestDiscordInteraction_contributeDeferred(t *testing.T) {
+// TestDiscordInteraction_contributeMissingIdentityEphemeral exercises /contribute's response
+// to an interaction that carries no Member/User: handleContributeCommand resolves the caller's
+// identity SYNCHRONOUSLY, before deciding whether to defer, so an unidentified caller gets an
+// immediate ephemeral reply (type 4, "could not identify") rather than a deferred response —
+// there is nothing left to defer for, since intake.Resolve is never reached. See
+// TestNoAnonymousContribution_missingIdentityNeverReachesIntake for the same property asserted
+// directly against the dispatch code.
+func TestDiscordInteraction_contributeMissingIdentityEphemeral(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -286,11 +287,11 @@ func TestDiscordInteraction_contributeDeferred(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Type != discordbot.ResponseTypeDeferredChannelMessageWithSource {
-		t.Errorf("response type = %d, want %d (deferred)", out.Type, discordbot.ResponseTypeDeferredChannelMessageWithSource)
+	if out.Type != discordbot.ResponseTypeChannelMessageWithSource {
+		t.Errorf("response type = %d, want %d (immediate channel message, not deferred)", out.Type, discordbot.ResponseTypeChannelMessageWithSource)
 	}
-	if out.Data != nil {
-		t.Errorf("response data = %+v, want nil (deferred response carries no payload)", out.Data)
+	if out.Data == nil || out.Data.Flags != discordbot.FlagEphemeral {
+		t.Errorf("response data = %+v, want ephemeral flag set", out.Data)
 	}
 }
 
@@ -314,29 +315,24 @@ func TestCommandOption_readsURL(t *testing.T) {
 }
 
 // TestNoAnonymousContribution_missingIdentityNeverReachesIntake covers ONE of the two ways
-// /contribute can face an unlinked caller: the interaction itself carries no Member/User,
-// so interactionUserID returns ok=false and processDiscordContribution takes its first early
-// return (discord.go's "could not identify your Discord account" branch) without ever
-// touching h.queries or h.intake. This test drives that exact path directly (bypassing the
-// goroutine race the HTTP-level test above can't observe) against a handler whose queries and
-// intake fields are nil: a call to either would panic, so a call completing without panic is
-// proof neither was reached.
+// /contribute can face an unlinked caller: the interaction itself carries no Member/User, so
+// interactionUserID returns ok=false and handleContributeCommand takes its first early return
+// (discord.go's "could not identify your Discord account" branch) — synchronously, before ever
+// spawning the background goroutine, and without ever touching h.queries or h.intake. This test
+// drives handleContributeCommand directly (rather than processDiscordContribution — there is no
+// goroutine on this path anymore to bypass) against a handler whose queries and intake fields
+// are nil: a call to either would panic, so completing without panic is proof neither was
+// reached, and the response type confirms it was answered immediately rather than deferred.
 //
 // It does NOT cover the other, more common way a caller is unlinked: an interaction that DOES
 // identify a Discord account, but GetUserIDByDiscordID returns pgx.ErrNoRows because that
 // account was never linked to a freehire user (discord.go's second early return). h.queries is
 // a concrete *db.Queries, not an interface, so exercising that branch needs a real Postgres
 // connection to return ErrNoRows from — there is no seam to stub it in a unit test. That branch
-// is proven only by reading the code (it returns before reaching h.intake.Resolve, same as
-// this one) until Task 5 adds DB-backed integration coverage for it.
+// is proven only by reading the code (it returns before reaching h.intake.Resolve, same as this
+// one) plus the DB-backed integration coverage in discord_integration_test.go.
 func TestNoAnonymousContribution_missingIdentityNeverReachesIntake(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
 	h := &discordHandlers{
-		discordBot: discordbot.NewClientWithBase("bottoken", srv.URL),
 		// queries and intake are deliberately nil: GetUserIDByDiscordID or intake.Resolve
 		// would panic on a nil receiver/field, so this is a hard guard, not just an assertion.
 	}
@@ -352,10 +348,24 @@ func TestNoAnonymousContribution_missingIdentityNeverReachesIntake(t *testing.T)
 	if ok {
 		t.Fatalf("interactionUserID = (%d, true), want ok=false for an interaction with no Member/User", discordID)
 	}
-	// Runs synchronously (not via `go`) so the test observes completion directly instead of
-	// racing a background goroutine. It must return without panicking despite nil
-	// queries/intake — that's the proof this path never dereferences either.
-	h.processDiscordContribution(interaction.Token, discordID, ok, "https://boards.example.com/co/jobs/123")
+
+	// Calls the handler directly rather than through app.Test — this must return without
+	// panicking despite nil queries/intake, which is the proof this path never dereferences
+	// either.
+	c := fiberCtx()
+	if err := h.handleContributeCommand(c, interaction); err != nil {
+		t.Fatalf("handleContributeCommand: %v", err)
+	}
+	var out discordbot.Response
+	if err := json.Unmarshal(c.Response().Body(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Type != discordbot.ResponseTypeChannelMessageWithSource {
+		t.Errorf("response type = %d, want %d (immediate channel message, not deferred)", out.Type, discordbot.ResponseTypeChannelMessageWithSource)
+	}
+	if out.Data == nil || out.Data.Flags != discordbot.FlagEphemeral {
+		t.Errorf("response data = %+v, want ephemeral flag set", out.Data)
+	}
 }
 
 // TestRenderIntakeOutcome is the "no regression from the extraction" check: renderIntakeOutcome
@@ -367,7 +377,14 @@ func TestRenderIntakeOutcome(t *testing.T) {
 	tests := []struct {
 		name string
 		out  intakeOutcome
+		// want is renderIntakeOutcome's output under telegramEmphasize (HTML) — read directly
+		// off the pre-extraction switch, so it also proves Telegram's exact prior wording is
+		// unchanged.
 		want string
+		// wantMarkdown is the output under discordEmphasize; empty means "identical to want" —
+		// true for every branch except outcomeQueued/Rewarded, the only one with an emphasis
+		// span.
+		wantMarkdown string
 	}{
 		{
 			name: "found",
@@ -407,6 +424,8 @@ func TestRenderIntakeOutcome(t *testing.T) {
 			name: "queued and rewarded",
 			out:  intakeOutcome{Status: outcomeQueued, Board: "Acme <Careers>", Rewarded: true},
 			want: "🎉 We couldn't open that page, but <b>Acme &lt;Careers&gt;</b> is a company we don't crawl yet — added to the queue. +1 AI credit!",
+			wantMarkdown: "🎉 We couldn't open that page, but **Acme <Careers>** is a company we don't crawl yet — " +
+				"added to the queue. +1 AI credit!",
 		},
 		{
 			name: "queued but board already known",
@@ -420,9 +439,18 @@ func TestRenderIntakeOutcome(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := renderIntakeOutcome(tt.out, origin); got != tt.want {
+		t.Run(tt.name+"/html", func(t *testing.T) {
+			if got := renderIntakeOutcome(tt.out, origin, telegramEmphasize); got != tt.want {
 				t.Errorf("renderIntakeOutcome() =\n%q\nwant\n%q", got, tt.want)
+			}
+		})
+		wantMarkdown := tt.wantMarkdown
+		if wantMarkdown == "" {
+			wantMarkdown = tt.want
+		}
+		t.Run(tt.name+"/markdown", func(t *testing.T) {
+			if got := renderIntakeOutcome(tt.out, origin, discordEmphasize); got != wantMarkdown {
+				t.Errorf("renderIntakeOutcome() =\n%q\nwant\n%q", got, wantMarkdown)
 			}
 		})
 	}

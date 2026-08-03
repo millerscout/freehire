@@ -97,7 +97,7 @@ func (h *discordHandlers) LinkDiscord(c *fiber.Ctx) error {
 		return err
 	}
 	if !h.discordEnabled() {
-		return fiber.NewError(fiber.StatusServiceUnavailable, "discord notifications are not configured")
+		return fiber.NewError(fiber.StatusServiceUnavailable, "discord bot is not configured")
 	}
 	token, err := h.discordLinks.Issue(userID)
 	if err != nil {
@@ -184,7 +184,8 @@ func (h *discordHandlers) DiscordInteraction(c *fiber.Ctx) error {
 }
 
 // dispatchCommand routes an APPLICATION_COMMAND interaction by command name.
-// "link" replies synchronously; "contribute" defers and finishes in the
+// "link" always replies synchronously; "contribute" replies synchronously for
+// an unidentified/unlinked caller and otherwise defers, finishing in the
 // background (see handleContributeCommand). Any other name gets a generic
 // not-yet-available reply rather than a panic on an unrecognized shape.
 func (h *discordHandlers) dispatchCommand(c *fiber.Ctx, interaction discordbot.Interaction) error {
@@ -232,40 +233,45 @@ func (h *discordHandlers) handleLinkCommand(c *fiber.Ctx, interaction discordbot
 // intake may now fetch a whole ATS board to read one vacancy.
 const discordContribTimeout = 60 * time.Second
 
-// handleContributeCommand replies immediately with a deferred response — Discord gives a
-// synchronous interaction reply only 3 seconds, and intake may take much longer — then
-// finishes the work in a background goroutine bounded by discordContribTimeout, editing the
-// original response with the outcome once it's known.
+// handleContributeCommand resolves the caller's linked account SYNCHRONOUSLY, inside Discord's
+// 3-second interaction budget — interactionUserID is in-memory and GetUserIDByDiscordID is a
+// single indexed lookup, both well within it — and only THEN decides whether to defer: an
+// unidentified or unlinked caller gets an immediate ephemeral reply and intakeService.Resolve is
+// never reached (see the package's Global Constraints on no anonymous contribution). Only the
+// genuinely slow part, intake.Resolve, runs in a background goroutine bounded by
+// discordContribTimeout, behind a deferred response.
+//
+// Resolving the account first (rather than deferring unconditionally, as an earlier version
+// did) also fixes a real race: the deferred ack and the goroutine that would otherwise act on an
+// unresolved account both start immediately, so a fast failure path could call
+// EditOriginalResponse before Discord had finished processing the deferred ack, 404ing the PATCH
+// and leaving the user's reply stuck on "thinking".
 func (h *discordHandlers) handleContributeCommand(c *fiber.Ctx, interaction discordbot.Interaction) error {
 	url := commandOption(interaction.Data, "url")
 	discordID, ok := interactionUserID(interaction)
-	go h.processDiscordContribution(interaction.Token, discordID, ok, url)
-	return c.JSON(discordbot.DeferredResponse())
-}
-
-// processDiscordContribution resolves the invoking Discord identity to a linked account,
-// submits the link, and edits the deferred reply with the outcome — on its own bounded
-// background context (the interaction has already been acknowledged by the deferred
-// response). An unlinked identity is told to link first; intakeService.Resolve is never
-// called in that branch — see the package's Global Constraints on no anonymous contribution.
-func (h *discordHandlers) processDiscordContribution(interactionToken string, discordID int64, ok bool, rawURL string) {
-	ctx, cancel := context.WithTimeout(context.Background(), discordContribTimeout)
-	defer cancel()
-
 	if !ok {
-		h.editOriginalResponse(ctx, interactionToken, "⚠️ Could not identify your Discord account.")
-		return
+		return c.JSON(discordbot.EphemeralResponse("⚠️ Could not identify your Discord account."))
 	}
 
-	userID, err := h.queries.GetUserIDByDiscordID(ctx, discordID)
+	userID, err := h.queries.GetUserIDByDiscordID(c.Context(), discordID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		h.editOriginalResponse(ctx, interactionToken, "🔗 Link your freehire account first (Settings → Discord on the site), then run /contribute again.")
-		return
+		return c.JSON(discordbot.EphemeralResponse("🔗 Link your freehire account first — run /link on the Contribute page (" + h.frontendOrigin + "/my/contributions), then /contribute again."))
 	}
 	if err != nil {
 		log.Printf("discord: resolve discord_id=%d: %v", discordID, err)
-		return
+		return c.JSON(discordbot.EphemeralResponse("⚠️ Something went wrong. Please try again."))
 	}
+
+	go h.processDiscordContribution(interaction.Token, userID, url)
+	return c.JSON(discordbot.DeferredResponse())
+}
+
+// processDiscordContribution runs the intake sequence for an already-resolved account and edits
+// the deferred reply with the outcome — on its own bounded background context (the interaction
+// has already been acknowledged by the deferred response handleContributeCommand returned).
+func (h *discordHandlers) processDiscordContribution(interactionToken string, userID int64, rawURL string) {
+	ctx, cancel := context.WithTimeout(context.Background(), discordContribTimeout)
+	defer cancel()
 
 	out, err := h.intake.Resolve(ctx, userID, rawURL, contribution.SurfaceDiscord)
 	if err != nil {
@@ -273,7 +279,14 @@ func (h *discordHandlers) processDiscordContribution(interactionToken string, di
 		h.editOriginalResponse(ctx, interactionToken, "⚠️ Something went wrong. Please try again.")
 		return
 	}
-	h.editOriginalResponse(ctx, interactionToken, renderIntakeOutcome(out, h.frontendOrigin))
+	h.editOriginalResponse(ctx, interactionToken, renderIntakeOutcome(out, h.frontendOrigin, discordEmphasize))
+}
+
+// discordEmphasize renders emphasis as Discord Markdown bold. Discord interaction responses are
+// Markdown, not HTML — unlike Telegram's parse_mode: "HTML" replies (see telegramEmphasize) — so
+// no escaping is applied here.
+func discordEmphasize(s string) string {
+	return "**" + s + "**"
 }
 
 // editOriginalResponse edits the deferred interaction reply, logging (not surfacing) a send

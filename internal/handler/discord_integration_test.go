@@ -1,14 +1,18 @@
 //go:build integration
 
-// Integration test for the Discord contribution surface: a linked user's /contribute runs
-// through the same intake sequence as the website and Telegram (look, import, record),
-// replying via a deferred ack followed by a background EditOriginalResponse call. The one
-// property no unit test can prove without a real database is the "no anonymous contribution"
-// constraint's more common branch: an interaction that DOES identify a Discord account, but
-// whose account was never linked, must never reach intakeService.Resolve — see
+// Integration test for the Discord contribution surface: a linked user's /contribute resolves
+// the account synchronously (a single indexed lookup, well inside Discord's 3-second budget),
+// then runs the intake sequence — the same look/import/record sequence as the website and
+// Telegram — in a background goroutine behind a deferred ack, replying via EditOriginalResponse
+// once it finishes. The one property no unit test can prove without a real database is the "no
+// anonymous contribution" constraint's more common branch: an interaction that DOES identify a
+// Discord account, but whose account was never linked, must never reach intakeService.Resolve —
+// see
 // TestDiscordContribution/an_unlinked_identity's_.2Fcontribute_reaches_neither_intake_nor_the_reward_path
-// below, which asserts directly against link_contributions and credit_balances that nothing
-// was written. Run with: go test -tags=integration ./internal/handler/
+// below. Because the account lookup runs synchronously, that branch answers immediately (an
+// ephemeral type-4 reply, not a deferred one) — the test asserts on the interaction response
+// itself, plus directly against link_contributions and credit_balances, that nothing was
+// written. Run with: go test -tags=integration ./internal/handler/
 package handler
 
 import (
@@ -202,12 +206,18 @@ func TestDiscordContribution(t *testing.T) {
 		const unlinkedDiscordID int64 = 999999999999999999
 		const url = "https://newco3.recruitee.com/o/never-imported"
 		out := contribute(t, unlinkedDiscordID, url)
-		if out.Type != discordbot.ResponseTypeDeferredChannelMessageWithSource {
-			t.Fatalf("response type = %d, want deferred", out.Type)
+		// GetUserIDByDiscordID runs synchronously in handleContributeCommand, so an unlinked
+		// account is answered immediately (ephemeral, type 4) rather than deferred — there is no
+		// background goroutine, and so no follow-up PATCH to wait for.
+		if out.Type != discordbot.ResponseTypeChannelMessageWithSource {
+			t.Fatalf("response type = %d, want immediate channel message (not deferred)", out.Type)
 		}
-		reply := waitFollowup(t)
+		if out.Data == nil || out.Data.Flags != discordbot.FlagEphemeral {
+			t.Errorf("response data = %+v, want ephemeral flag set", out.Data)
+		}
+		reply := out.Data.Content
 		if !strings.Contains(strings.ToLower(reply), "link your") {
-			t.Errorf("follow-up = %q, want a link-your-account prompt", reply)
+			t.Errorf("reply = %q, want a link-your-account prompt", reply)
 		}
 		// The proof this is not just a wording check: no row was written for the link at all,
 		// and no user anywhere gained a credit from it — GetUserIDByDiscordID's ErrNoRows branch

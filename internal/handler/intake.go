@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"errors"
-	"html"
 	"log"
 
 	"github.com/strelov1/freehire/internal/contribution"
@@ -180,7 +179,12 @@ func (s *intakeService) record(ctx context.Context, userID int64, pageURL, surfa
 // we could have handed them the job. Shared across every surface that calls intakeService.Resolve
 // and reports the result back to the submitter (Telegram's chat reply, Discord's deferred
 // response), so the wording does not drift between them.
-func renderIntakeOutcome(out intakeOutcome, frontendOrigin string) string {
+//
+// emphasize renders the one span of emphasis this wording needs (a board name), in whatever
+// markup the calling surface actually understands: Telegram sends parse_mode "HTML", Discord
+// interaction responses are Markdown — hardcoding either here would render as literal markup on
+// the other surface.
+func renderIntakeOutcome(out intakeOutcome, frontendOrigin string, emphasize func(string) string) string {
 	switch out.Status {
 	case outcomeFound:
 		return "👍 We already have this one:\n" + jobURL(frontendOrigin, out.PublicSlug)
@@ -207,8 +211,8 @@ func renderIntakeOutcome(out intakeOutcome, frontendOrigin string) string {
 	// accepted — and paid for.
 	switch {
 	case out.Rewarded:
-		return "🎉 We couldn't open that page, but <b>" + html.EscapeString(out.Board) +
-			"</b> is a company we don't crawl yet — added to the queue. +1 AI credit!"
+		return "🎉 We couldn't open that page, but " + emphasize(out.Board) +
+			" is a company we don't crawl yet — added to the queue. +1 AI credit!"
 	case out.Board != "":
 		return "👍 We couldn't open that page, but that company's board is already known to us — nothing to add."
 	default:

@@ -156,12 +156,15 @@ type Settings struct {
 	TelegramWebhookSecret string
 
 	// Discord bot for slash-command board contributions, mirroring the Telegram bot's
-	// role. Optional: empty DiscordBotToken disables the feature — the linking
-	// endpoints and interaction webhook are inert. DiscordApplicationID and
-	// DiscordPublicKey are the app's identity and the key used to verify inbound
-	// interaction signatures. DiscordGuildID scopes slash-command registration to a
-	// single guild for instant propagation during development; empty registers
-	// commands globally.
+	// role. All four values are required together: the feature is disabled unless
+	// DiscordBotToken, DiscordApplicationID, DiscordPublicKey, and DiscordGuildID are
+	// ALL set — see newDiscordHandlers/discordEnabled in internal/handler/discord.go.
+	// DiscordApplicationID and DiscordPublicKey are the app's identity and the key
+	// used to verify inbound interaction signatures. DiscordGuildID scopes the
+	// one-time slash-command registration (cmd/discord-register-commands, not
+	// cmd/server) to a single guild — that command is the only place commands are
+	// ever registered, and it too requires a guild id; there is no global-registration
+	// code path.
 	DiscordBotToken      string
 	DiscordApplicationID string
 	DiscordPublicKey     string
