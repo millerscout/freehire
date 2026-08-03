@@ -64,11 +64,11 @@ surfaces reachable WITHOUT already knowing the slug need to actively exclude `is
 
 ## 6. Frontend — `/my/cvs` entry point
 
-- [ ] 6.1 Add the API client method for `POST /api/v1/me/jd/resolve`
+- [x] 6.1 Add the API client method for `POST /api/v1/me/jd/resolve`
       (`web/src/lib/api.ts`).
-- [ ] 6.2 Add a "Подобрать вакансию для резюме" button + form on
-      `web/src/routes/my/cvs/+page.svelte` with three tabs: existing-job search/select, URL
-      input, and text input (with optional title/company fields).
-- [ ] 6.3 Wire the "our vacancy" tab to redirect straight to `/tailor/[slug]` (no backend call).
-- [ ] 6.4 Wire the URL and text tabs to the new endpoint, handling loading/400/422 states, and
+- [x] 6.2 Add a "Tailor for a job" button + form (`JdIntakeDialog.svelte`, mounted from
+      `CvList.svelte`) with three tabs: existing-job search/select, URL input, and text input
+      (with optional title/company fields).
+- [x] 6.3 Wire the "our vacancy" tab to redirect straight to `/tailor/[slug]` (no backend call).
+- [x] 6.4 Wire the URL and text tabs to the new endpoint, handling loading/422/401 states, and
       redirect to `/tailor/[job_slug]` on success.
