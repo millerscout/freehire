@@ -255,7 +255,7 @@ func TestDiscordInteraction_disabledReturns404(t *testing.T) {
 // deferred response (type 5, no data payload), regardless of what the background goroutine
 // later does. The interaction carries no Member/User, so the spawned goroutine takes the
 // "could not identify" branch and never touches h.queries or h.intake (both nil on this
-// handler) — see TestNoAnonymousContribution_neverReachesIntake for the same property
+// handler) — see TestNoAnonymousContribution_missingIdentityNeverReachesIntake for the same property
 // asserted directly against the dispatch code.
 func TestDiscordInteraction_contributeDeferred(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(nil)
@@ -313,18 +313,30 @@ func TestCommandOption_readsURL(t *testing.T) {
 	}
 }
 
-// TestNoAnonymousContribution_neverReachesIntake is the single most important behavioral
-// requirement of this feature: an unlinked Discord identity's /contribute must not reach
-// intakeService.Resolve. handleContributeCommand resolves discordID/ok synchronously and
-// hands both to processDiscordContribution; when ok is false — no Member/User on the
-// interaction — processDiscordContribution returns after the "could not identify" reply
-// without ever touching h.queries or h.intake. This test drives that exact path directly
-// (bypassing the goroutine race the HTTP-level test above can't observe) against a handler
-// whose queries and intake fields are nil: a call to either would panic, so a call
-// completing without panic is proof neither was reached.
-func TestNoAnonymousContribution_neverReachesIntake(t *testing.T) {
+// TestNoAnonymousContribution_missingIdentityNeverReachesIntake covers ONE of the two ways
+// /contribute can face an unlinked caller: the interaction itself carries no Member/User,
+// so interactionUserID returns ok=false and processDiscordContribution takes its first early
+// return (discord.go's "could not identify your Discord account" branch) without ever
+// touching h.queries or h.intake. This test drives that exact path directly (bypassing the
+// goroutine race the HTTP-level test above can't observe) against a handler whose queries and
+// intake fields are nil: a call to either would panic, so a call completing without panic is
+// proof neither was reached.
+//
+// It does NOT cover the other, more common way a caller is unlinked: an interaction that DOES
+// identify a Discord account, but GetUserIDByDiscordID returns pgx.ErrNoRows because that
+// account was never linked to a freehire user (discord.go's second early return). h.queries is
+// a concrete *db.Queries, not an interface, so exercising that branch needs a real Postgres
+// connection to return ErrNoRows from — there is no seam to stub it in a unit test. That branch
+// is proven only by reading the code (it returns before reaching h.intake.Resolve, same as
+// this one) until Task 5 adds DB-backed integration coverage for it.
+func TestNoAnonymousContribution_missingIdentityNeverReachesIntake(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
 	h := &discordHandlers{
-		discordBot: discordbot.NewClient("bottoken"),
+		discordBot: discordbot.NewClientWithBase("bottoken", srv.URL),
 		// queries and intake are deliberately nil: GetUserIDByDiscordID or intake.Resolve
 		// would panic on a nil receiver/field, so this is a hard guard, not just an assertion.
 	}
