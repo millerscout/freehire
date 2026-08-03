@@ -163,6 +163,7 @@
               Link your account to run <code class="rounded bg-secondary px-1 py-0.5 font-mono text-[11px]">/contribute</code>
               in the freehire Discord server for the same reward.
               {#if discordChannelUrl}
+                <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- external Discord channel URL, not an internal route -->
                 <a
                   href={discordChannelUrl}
                   target="_blank"
