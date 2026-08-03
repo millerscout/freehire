@@ -28,17 +28,17 @@
 
 ## 3. HTTP and web
 
-- [ ] 3.1 Accept the opt-in on `GET /me/inbox` and `GET /me/emails`, and return the hidden
+- [x] 3.1 Accept the opt-in on `GET /me/inbox` and `GET /me/emails`, and return the hidden
       count in the listing's meta.
-- [ ] 3.2 Show the count and the control in the inbox. A hidden filter with no indicator is
+- [x] 3.2 Show the count and the control in the inbox. A hidden filter with no indicator is
       the failure this design exists to avoid, so the number is visible without opening
       anything.
-- [ ] 3.3 Run `pnpm run check`, `pnpm run lint`, and the design-system ratchets.
+- [x] 3.3 Run `pnpm run check`, `pnpm run lint`, and the design-system ratchets.
 
 ## 4. Documentation and gates
 
-- [ ] 4.1 Update `docs/agents/mail-stack.md`: what the fetch is scoped to now, that the
+- [x] 4.1 Update `docs/agents/mail-stack.md`: what the fetch is scoped to now, that the
       classifier is the inbox filter and why no blocklist exists, and that the filter is at
       display because the watermark makes a fetch-time filter permanent.
-- [ ] 4.2 Run `go build ./...`, `go vet ./...`, `go test ./...`, and
+- [x] 4.2 Run `go build ./...`, `go vet ./...`, `go test ./...`, and
       `go vet -tags=integration ./...` before pushing.
