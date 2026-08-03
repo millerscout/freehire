@@ -809,6 +809,163 @@ func (q *Queries) GetJobIDBySlug(ctx context.Context, publicSlug string) (int64,
 	return id, err
 }
 
+const insertPrivateJob = `-- name: InsertPrivateJob :one
+INSERT INTO jobs (
+    source, external_id, url, title, company, company_slug, location, remote, description,
+    public_slug, countries, regions, cities, work_mode, skills, seniority, category, is_tech,
+    posting_language, employment_type, education_level, english_level, experience_years_min,
+    content_hash, role_fingerprint,
+    created_by, is_private
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7, $8,
+    $9,
+    $10,
+    COALESCE($11::text[], '{}'), COALESCE($12::text[], '{}'), COALESCE($13::text[], '{}'),
+    $14, COALESCE($15::text[], '{}'),
+    $16, $17, $18,
+    $19, $20, $21, $22, $23,
+    $24, $25,
+    $26::bigint, true
+)
+RETURNING id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private
+`
+
+type InsertPrivateJobParams struct {
+	Source             string      `json:"source"`
+	ExternalID         string      `json:"external_id"`
+	URL                string      `json:"url"`
+	Title              string      `json:"title"`
+	Company            string      `json:"company"`
+	CompanySlug        string      `json:"company_slug"`
+	Location           string      `json:"location"`
+	Remote             bool        `json:"remote"`
+	Description        string      `json:"description"`
+	PublicSlug         string      `json:"public_slug"`
+	Countries          []string    `json:"countries"`
+	Regions            []string    `json:"regions"`
+	Cities             []string    `json:"cities"`
+	WorkMode           string      `json:"work_mode"`
+	Skills             []string    `json:"skills"`
+	Seniority          string      `json:"seniority"`
+	Category           string      `json:"category"`
+	IsTech             pgtype.Bool `json:"is_tech"`
+	PostingLanguage    string      `json:"posting_language"`
+	EmploymentType     string      `json:"employment_type"`
+	EducationLevel     string      `json:"education_level"`
+	EnglishLevel       string      `json:"english_level"`
+	ExperienceYearsMin pgtype.Int4 `json:"experience_years_min"`
+	ContentHash        pgtype.Text `json:"content_hash"`
+	RoleFingerprint    pgtype.Text `json:"role_fingerprint"`
+	CreatedBy          int64       `json:"created_by"`
+}
+
+// Creates a job visible only to its creator: the jd-tailor-intake private-JD path
+// (pasted text, or a URL only a generic scrape could read). Always a plain INSERT,
+// never an upsert — external_id is a synthetic value scoped to this one submission
+// (see internal/privatejob), never compared against the public (source, external_id)
+// dedup space, so two submissions never collide and this never conflicts with an
+// existing row.
+//
+// Deliberately does NOT touch the companies table (unlike UpsertJob/UpsertManualJob):
+// a private submission's employer name is not a vetted catalogue entry, so minting or
+// updating a companies row from it would leak a one-off private JD's company into the
+// public companies directory. jobs.company_slug has no FK to companies, so this is
+// safe to leave unbacked.
+//
+// Also deliberately does NOT enqueue enrichment (contrast UpsertManualJob's Repository,
+// which does): a private, single-tailoring-session row doesn't recoup that cost. The
+// caller supplies content_hash/role_fingerprint precomputed the same way every other
+// write path does (job.Fields.UpsertParams), so a private job's fingerprints are
+// comparable if it were ever to matter, even though it is never indexed or clustered.
+func (q *Queries) InsertPrivateJob(ctx context.Context, arg InsertPrivateJobParams) (Job, error) {
+	row := q.db.QueryRow(ctx, insertPrivateJob,
+		arg.Source,
+		arg.ExternalID,
+		arg.URL,
+		arg.Title,
+		arg.Company,
+		arg.CompanySlug,
+		arg.Location,
+		arg.Remote,
+		arg.Description,
+		arg.PublicSlug,
+		arg.Countries,
+		arg.Regions,
+		arg.Cities,
+		arg.WorkMode,
+		arg.Skills,
+		arg.Seniority,
+		arg.Category,
+		arg.IsTech,
+		arg.PostingLanguage,
+		arg.EmploymentType,
+		arg.EducationLevel,
+		arg.EnglishLevel,
+		arg.ExperienceYearsMin,
+		arg.ContentHash,
+		arg.RoleFingerprint,
+		arg.CreatedBy,
+	)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.Source,
+		&i.ExternalID,
+		&i.URL,
+		&i.Title,
+		&i.Company,
+		&i.Location,
+		&i.Remote,
+		&i.Description,
+		&i.PostedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CompanySlug,
+		&i.Enrichment,
+		&i.EnrichedAt,
+		&i.EnrichmentVersion,
+		&i.PublicSlug,
+		&i.LastSeenAt,
+		&i.ClosedAt,
+		&i.Countries,
+		&i.Regions,
+		&i.WorkMode,
+		&i.LivenessStrikes,
+		&i.Skills,
+		&i.Seniority,
+		&i.Category,
+		&i.CreatedBy,
+		&i.UpdatedBy,
+		&i.PostingLanguage,
+		&i.EmploymentType,
+		&i.EducationLevel,
+		&i.ExperienceYearsMin,
+		&i.Collections,
+		&i.ContentHash,
+		&i.EnglishLevel,
+		&i.Cities,
+		&i.ViewCount,
+		&i.AppliedCount,
+		&i.RoleFingerprint,
+		&i.SemanticEmbeddedModel,
+		&i.SemanticEmbeddedHash,
+		&i.DuplicateOf,
+		&i.IsTech,
+		&i.SemanticEmbedding,
+		&i.SalaryMinManual,
+		&i.SalaryMaxManual,
+		&i.SalaryCurrencyManual,
+		&i.SalaryPeriodManual,
+		&i.UpvoteCount,
+		&i.DownvoteCount,
+		&i.AtsAbsentAt,
+		&i.ClosedReason,
+		&i.IsPrivate,
+	)
+	return i, err
+}
+
 const listJobIDsAfter = `-- name: ListJobIDsAfter :many
 SELECT id
 FROM jobs

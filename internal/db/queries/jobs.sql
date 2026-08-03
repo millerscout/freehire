@@ -790,6 +790,45 @@ ON CONFLICT (source, external_id) DO UPDATE SET
     updated_at   = now()
 RETURNING *;
 
+-- name: InsertPrivateJob :one
+-- Creates a job visible only to its creator: the jd-tailor-intake private-JD path
+-- (pasted text, or a URL only a generic scrape could read). Always a plain INSERT,
+-- never an upsert — external_id is a synthetic value scoped to this one submission
+-- (see internal/privatejob), never compared against the public (source, external_id)
+-- dedup space, so two submissions never collide and this never conflicts with an
+-- existing row.
+--
+-- Deliberately does NOT touch the companies table (unlike UpsertJob/UpsertManualJob):
+-- a private submission's employer name is not a vetted catalogue entry, so minting or
+-- updating a companies row from it would leak a one-off private JD's company into the
+-- public companies directory. jobs.company_slug has no FK to companies, so this is
+-- safe to leave unbacked.
+--
+-- Also deliberately does NOT enqueue enrichment (contrast UpsertManualJob's Repository,
+-- which does): a private, single-tailoring-session row doesn't recoup that cost. The
+-- caller supplies content_hash/role_fingerprint precomputed the same way every other
+-- write path does (job.Fields.UpsertParams), so a private job's fingerprints are
+-- comparable if it were ever to matter, even though it is never indexed or clustered.
+INSERT INTO jobs (
+    source, external_id, url, title, company, company_slug, location, remote, description,
+    public_slug, countries, regions, cities, work_mode, skills, seniority, category, is_tech,
+    posting_language, employment_type, education_level, english_level, experience_years_min,
+    content_hash, role_fingerprint,
+    created_by, is_private
+) VALUES (
+    sqlc.arg(source), sqlc.arg(external_id), sqlc.arg(url), sqlc.arg(title),
+    sqlc.arg(company), sqlc.arg(company_slug), sqlc.arg(location), sqlc.arg(remote),
+    sqlc.arg(description),
+    sqlc.arg(public_slug),
+    COALESCE(sqlc.arg(countries)::text[], '{}'), COALESCE(sqlc.arg(regions)::text[], '{}'), COALESCE(sqlc.arg(cities)::text[], '{}'),
+    sqlc.arg(work_mode), COALESCE(sqlc.arg(skills)::text[], '{}'),
+    sqlc.arg(seniority), sqlc.arg(category), sqlc.arg(is_tech),
+    sqlc.arg(posting_language), sqlc.arg(employment_type), sqlc.arg(education_level), sqlc.arg(english_level), sqlc.arg(experience_years_min),
+    sqlc.arg(content_hash), sqlc.arg(role_fingerprint),
+    sqlc.arg(created_by)::bigint, true
+)
+RETURNING *;
+
 -- name: UpdateManualJob :one
 -- Moderator edit of a hand-curated job, addressed by public_slug and scoped to
 -- created_by IS NOT NULL so this path can only rewrite a moderator-authored posting,

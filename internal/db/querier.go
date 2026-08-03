@@ -1110,6 +1110,25 @@ type Querier interface {
 	// has a mailbox) or address (taken) — the allocation service handles both: it
 	// reads-back on a user conflict and retries the next suffix on an address conflict.
 	InsertMailbox(ctx context.Context, arg InsertMailboxParams) (Mailbox, error)
+	// Creates a job visible only to its creator: the jd-tailor-intake private-JD path
+	// (pasted text, or a URL only a generic scrape could read). Always a plain INSERT,
+	// never an upsert — external_id is a synthetic value scoped to this one submission
+	// (see internal/privatejob), never compared against the public (source, external_id)
+	// dedup space, so two submissions never collide and this never conflicts with an
+	// existing row.
+	//
+	// Deliberately does NOT touch the companies table (unlike UpsertJob/UpsertManualJob):
+	// a private submission's employer name is not a vetted catalogue entry, so minting or
+	// updating a companies row from it would leak a one-off private JD's company into the
+	// public companies directory. jobs.company_slug has no FK to companies, so this is
+	// safe to leave unbacked.
+	//
+	// Also deliberately does NOT enqueue enrichment (contrast UpsertManualJob's Repository,
+	// which does): a private, single-tailoring-session row doesn't recoup that cost. The
+	// caller supplies content_hash/role_fingerprint precomputed the same way every other
+	// write path does (job.Fields.UpsertParams), so a private job's fingerprints are
+	// comparable if it were ever to matter, even though it is never indexed or clustered.
+	InsertPrivateJob(ctx context.Context, arg InsertPrivateJobParams) (Job, error)
 	// Append a reward: points earned (e.g. for an accepted board contribution), delta positive,
 	// feature NULL. Rewards bank above the monthly grant and survive the period reset. The
 	// partial unique index on (user_id, ref) WHERE kind='reward' guards against a double
