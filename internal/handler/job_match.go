@@ -2,7 +2,6 @@ package handler
 
 import (
 	"github.com/gofiber/fiber/v2"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/strelov1/freehire/internal/hardconstraint"
 	"github.com/strelov1/freehire/internal/jobmatch"
@@ -32,9 +31,6 @@ func (h *matchHandlers) JobMatch(c *fiber.Ctx) error {
 	job, err := h.queries.GetJobBySlug(c.Context(), c.Params("slug"))
 	if err != nil {
 		return err
-	}
-	if !jobVisibleTo(job, userID, true) {
-		return pgx.ErrNoRows
 	}
 	profile, err := h.userProfile.Get(c.Context(), userID)
 	if err != nil {

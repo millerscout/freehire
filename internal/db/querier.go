@@ -1617,6 +1617,11 @@ type Querier interface {
 	// its own location and apply URL, so a seeker picks their city; the anchor itself is
 	// included (it is one of the openings). Ordered by location. An empty-fingerprint anchor
 	// clusters with no one and returns nothing.
+	//
+	// AND NOT j.is_private excludes the jd-tailor-intake private-job path: without it, a
+	// private job that coincidentally shares its cluster key with a public one would surface
+	// (slug, location, url) to anyone browsing that PUBLIC job's copies — a listing leak, not
+	// merely "you'd need the direct link", which is what never indexing/listing it is for.
 	ListRoleClusterCopies(ctx context.Context, arg ListRoleClusterCopiesParams) ([]ListRoleClusterCopiesRow, error)
 	// Every public_slug the user has saved (bookmarked). Used by the SPA to render
 	// the save toggle as filled on already-saved cards in the browse list and search

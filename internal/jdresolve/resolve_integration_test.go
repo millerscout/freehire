@@ -127,38 +127,6 @@ func TestResolve_UnknownJobSlugIsNotFound(t *testing.T) {
 	}
 }
 
-// A private job's slug must not become an existence oracle: submitting it as job_slug
-// answers ErrJobNotFound for anyone but its creator, exactly like an unknown slug — the
-// caller learns nothing they didn't already assert by typing the slug in.
-func TestResolve_PrivateJobSlugIsNotFoundForAnyoneButItsCreator(t *testing.T) {
-	pool := testdb.Pool(t)
-	q := db.New(pool)
-	ctx := context.Background()
-
-	owner := seedUser(t, pool, "slug-owner@example.test")
-	stranger := seedUser(t, pool, "slug-stranger@example.test")
-	var slug string
-	if err := pool.QueryRow(ctx, `
-		INSERT INTO jobs (source, external_id, url, title, public_slug, is_private, created_by)
-		VALUES ('pasted', 'sl1', '', 'A private JD', 'resolve-private-job', true, $1)
-		RETURNING public_slug`, owner).Scan(&slug); err != nil {
-		t.Fatalf("seed private job: %v", err)
-	}
-
-	r := jdresolve.New(q, linkimport.New(pool, q, nil, pageClient{}, nil, nil), nil)
-
-	if _, err := r.Resolve(ctx, stranger, jdresolve.Request{JobSlug: slug}); !errors.Is(err, jdresolve.ErrJobNotFound) {
-		t.Errorf("stranger resolving a private slug: err = %v, want ErrJobNotFound", err)
-	}
-	got, err := r.Resolve(ctx, owner, jdresolve.Request{JobSlug: slug})
-	if err != nil {
-		t.Fatalf("owner resolving their own private slug: %v", err)
-	}
-	if got != slug {
-		t.Errorf("owner Resolve = %q, want the same slug %q", got, slug)
-	}
-}
-
 func TestResolve_RecognizedATSURLBecomesAPublicJob(t *testing.T) {
 	pool := testdb.Pool(t)
 	q := db.New(pool)

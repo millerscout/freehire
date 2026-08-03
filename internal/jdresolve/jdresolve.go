@@ -75,7 +75,7 @@ func New(q Queries, importer Importer, private PrivateWriter) *Resolver {
 func (r *Resolver) Resolve(ctx context.Context, userID int64, req Request) (string, error) {
 	switch {
 	case req.JobSlug != "":
-		return r.resolveSlug(ctx, userID, req.JobSlug)
+		return r.resolveSlug(ctx, req.JobSlug)
 	case req.URL != "":
 		return r.resolveURL(ctx, userID, req.URL)
 	default:
@@ -83,21 +83,13 @@ func (r *Resolver) Resolve(ctx context.Context, userID int64, req Request) (stri
 	}
 }
 
-// resolveSlug passes an existing job through unchanged — except a private job (see
-// jobs.is_private) not owned by userID is answered exactly as an unknown slug. Without
-// this, a caller could submit a guessed private slug and learn it exists (200 back)
-// before ever reaching one of the gated read surfaces (cv_tailor.go, match_analysis.go,
-// jobs.go) that would otherwise 404 it.
-func (r *Resolver) resolveSlug(ctx context.Context, userID int64, slug string) (string, error) {
+func (r *Resolver) resolveSlug(ctx context.Context, slug string) (string, error) {
 	j, err := r.q.GetJobBySlug(ctx, slug)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrJobNotFound
 	}
 	if err != nil {
 		return "", fmt.Errorf("jdresolve: get job by slug: %w", err)
-	}
-	if j.IsPrivate && (!j.CreatedBy.Valid || j.CreatedBy.Int64 != userID) {
-		return "", ErrJobNotFound
 	}
 	return j.PublicSlug, nil
 }

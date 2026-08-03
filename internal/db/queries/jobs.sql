@@ -457,6 +457,11 @@ WHERE id = sqlc.arg(id);
 -- its own location and apply URL, so a seeker picks their city; the anchor itself is
 -- included (it is one of the openings). Ordered by location. An empty-fingerprint anchor
 -- clusters with no one and returns nothing.
+--
+-- AND NOT j.is_private excludes the jd-tailor-intake private-job path: without it, a
+-- private job that coincidentally shares its cluster key with a public one would surface
+-- (slug, location, url) to anyone browsing that PUBLIC job's copies — a listing leak, not
+-- merely "you'd need the direct link", which is what never indexing/listing it is for.
 SELECT j.public_slug, j.location, j.url, j.posted_at,
     COUNT(*) OVER()::bigint AS total
 FROM jobs j
@@ -465,6 +470,7 @@ WHERE j.company_slug = anchor.company_slug
   AND j.role_fingerprint = anchor.role_fingerprint
   AND anchor.role_fingerprint <> ''
   AND j.closed_at IS NULL
+  AND NOT j.is_private
 ORDER BY j.location, j.id
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 

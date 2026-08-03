@@ -58,13 +58,6 @@ func (h *cvHandlers) TailorCV(c *fiber.Ctx) error {
 	if err != nil {
 		return err // unknown slug → pgx.ErrNoRows → 404 via RenderError
 	}
-	if !jobVisibleTo(job, userID, true) {
-		// A private job not owned by the caller is rejected the same way as an unknown
-		// vacancy (404), not the 409 cachedAnalysis would otherwise report (it would
-		// truthfully find no cached analysis for a stranger's private job — but a 409 there
-		// would leak that the slug exists at all).
-		return pgx.ErrNoRows
-	}
 	analysis, err := h.cachedAnalysis(c, userID, job.ID)
 	if err != nil {
 		return err

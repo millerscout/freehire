@@ -38,20 +38,29 @@
 - [x] 4.3 Handler tests: 200 + slug for each of the three input kinds; 400 for zero or multiple
       inputs; 401 unauthenticated; 422 for an unreadable URL.
 
-## 5. Visibility gating
+## 5. Visibility: unguessable + never-listed (not per-request ownership gating)
 
-- [ ] 5.1 Exclude `is_private` rows from `internal/search`'s Meilisearch-indexing query.
-- [ ] 5.2 Exclude `is_private` rows (and their count) from the DB-backed `GET /api/v1/jobs` list
-      query.
-- [ ] 5.3 Gate `jobs.go`'s `GetJob`: a private job not owned by the (optionally authenticated)
-      caller responds 404, identical to an unknown slug.
-- [ ] 5.4 Gate `match_analysis.go`'s three handlers (`GetMatchAnalysis`, `PostMatchAnalysis`,
-      `StreamMatchAnalysis`) with the same private-not-owned → 404 rule.
-- [ ] 5.5 Gate `cv_tailor.go`'s `TailorCV` with the same rule; the bootstrap is rejected the same
-      way as for an unknown vacancy.
-- [ ] 5.6 Tests: a private job is absent from a Meilisearch reindex and from `GET /api/v1/jobs`;
-      its creator can read/analyze/tailor it normally; a different user and an anonymous caller
-      get 404 from all three gated handlers.
+Privacy model settled after an audit found gating every job-by-slug consumer
+(`GetJob`/fit-analysis/`TailorCV`, then `job_match.go`, then jobtracking's ~11 methods, then 7
+more: vote/reminder/similar/copies/ghost_reports/reports/community) was an open-ended
+whack-a-mole, not a fixed list. Settled instead on: a private job behaves like a **closed** job
+for read access (reachable by anyone holding its exact slug, unchanged across every existing
+consumer), and relies on the slug's synthetic-UUID shortcode being unguessable. Only listing
+surfaces reachable WITHOUT already knowing the slug need to actively exclude `is_private`.
+
+- [x] 5.1 Exclude `is_private` rows from `internal/search`'s Meilisearch-indexing query
+      (`cmd/reindex`'s `splitJobs`).
+- [x] 5.2 Exclude `is_private` rows (and their count) from the DB-backed `GET /api/v1/jobs` list
+      query and `estimate_open_jobs()`.
+- [x] 5.3 Exclude `is_private` rows from `GET /jobs/:slug/copies` (`ListRoleClusterCopies`): a
+      private job can coincidentally share a role cluster (`company_slug` + `role_fingerprint`)
+      with an unrelated public one, surfacing its slug/location/url to anyone browsing that
+      public job's copies — the one listing path reachable without already knowing the private
+      slug.
+- [x] 5.4 Tests: a private job is absent from a Meilisearch reindex, from `GET /api/v1/jobs`, and
+      from another job's copies list even when it shares a role cluster; its own slug still
+      resolves normally through `GetJob`/fit-analysis/`TailorCV`/`job_match`/jobtracking (no
+      regression from treating it like a closed job for direct-link access).
 
 ## 6. Frontend — `/my/cvs` entry point
 
