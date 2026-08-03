@@ -3,6 +3,7 @@ package privatejob_test
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -47,6 +48,7 @@ func TestCreate_DerivesFacetsAndPersists(t *testing.T) {
 	_, err := w.Create(context.Background(), 42, privatejob.SourcePasted, privatejob.Input{
 		Title:       "Senior Go Developer",
 		Company:     "Acme",
+		Location:    "Remote - Germany",
 		Description: "We use Golang and PostgreSQL.",
 	})
 	if err != nil {
@@ -64,6 +66,45 @@ func TestCreate_DerivesFacetsAndPersists(t *testing.T) {
 	}
 	if got.Source != privatejob.SourcePasted {
 		t.Errorf("Source = %q, want %q", got.Source, privatejob.SourcePasted)
+	}
+	if got.Title != "Senior Go Developer" {
+		t.Errorf("Title = %q, want the submitted title", got.Title)
+	}
+	if got.Company != "Acme" {
+		t.Errorf("Company = %q, want Acme", got.Company)
+	}
+	if got.CompanySlug != "acme" {
+		t.Errorf("CompanySlug = %q, want acme", got.CompanySlug)
+	}
+	if got.PublicSlug == "" {
+		t.Error("PublicSlug is empty, want a minted slug")
+	}
+	if len(got.Countries) == 0 || got.Countries[0] != "de" {
+		t.Errorf("Countries = %v, want [de ...] (derived from Location)", got.Countries)
+	}
+}
+
+// A private submission can carry a scraped third-party page's markup (the
+// unrecognized-URL branch), and jobs.description is rendered as trusted HTML on the
+// job-detail page — so it must go through the same sanitizer every other write path
+// uses, not be persisted verbatim.
+func TestCreate_SanitizesDescription(t *testing.T) {
+	f := &fakeQueries{}
+	w := privatejob.NewWriter(f)
+
+	_, err := w.Create(context.Background(), 1, privatejob.SourceWeblink, privatejob.Input{
+		Title:       "Engineer",
+		Description: `<script>alert(1)</script><p>Real content.</p>`,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got := f.calls[0].Description
+	if strings.Contains(got, "<script") {
+		t.Errorf("Description = %q, want no <script> tag", got)
+	}
+	if !strings.Contains(got, "Real content.") {
+		t.Errorf("Description = %q, want the sanitized content preserved", got)
 	}
 }
 

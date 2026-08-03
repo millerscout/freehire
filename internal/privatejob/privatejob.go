@@ -15,6 +15,7 @@ import (
 	"github.com/strelov1/freehire/internal/db"
 	"github.com/strelov1/freehire/internal/job"
 	"github.com/strelov1/freehire/internal/jobderive"
+	"github.com/strelov1/freehire/internal/sources"
 )
 
 // Source values for the two private-job origins the jd-tailor-intake endpoint writes.
@@ -41,24 +42,29 @@ type Input struct {
 	URL         string // empty for the pasted-text origin
 }
 
-// queries is the persistence Writer depends on — the slice of *db.Queries it actually
+// Queries is the persistence Writer depends on — the slice of *db.Queries it actually
 // calls, kept as an interface so tests can fake it without a database.
-type queries interface {
+type Queries interface {
 	InsertPrivateJob(ctx context.Context, arg db.InsertPrivateJobParams) (db.Job, error)
 }
 
 // Writer creates private jobs rows.
-type Writer struct{ q queries }
+type Writer struct{ q Queries }
 
 // NewWriter constructs a Writer backed by q (typically *db.Queries).
-func NewWriter(q queries) *Writer { return &Writer{q: q} }
+func NewWriter(q Queries) *Writer { return &Writer{q: q} }
 
 // Create derives facets from in (see internal/jobderive) and persists a new private job
-// owned by userID. source must be SourcePasted or SourceWeblink.
+// owned by userID. source must be SourcePasted or SourceWeblink. The description is
+// sanitized to the same HTML allowlist every other write path uses (see
+// internal/sources.SanitizeHTML) before derivation and storage — a private submission
+// can carry a scraped third-party page's markup, and the job-detail view renders
+// jobs.description as trusted HTML.
 func (w *Writer) Create(ctx context.Context, userID int64, source string, in Input) (job.Job, error) {
+	description := sources.SanitizeHTML(in.Description)
 	title := strings.TrimSpace(in.Title)
 	if title == "" {
-		title = firstLine(in.Description)
+		title = firstLine(description)
 	}
 	if title == "" {
 		title = fallbackTitle
@@ -70,7 +76,7 @@ func (w *Writer) Create(ctx context.Context, userID int64, source string, in Inp
 			Title:       title,
 			Company:     strings.TrimSpace(in.Company),
 			Location:    in.Location,
-			Description: in.Description,
+			Description: description,
 		},
 		URL: in.URL,
 	})
