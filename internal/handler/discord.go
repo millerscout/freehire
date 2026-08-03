@@ -58,11 +58,14 @@ func newDiscordHandlers(queries *db.Queries, jwtSecret, botToken, applicationID,
 		frontendOrigin: frontendOrigin,
 		intake:         intake,
 	}
-	if botToken != "" && applicationID != "" && publicKey != "" && guildID != "" {
+	switch {
+	case botToken != "" && applicationID != "" && publicKey != "" && guildID != "":
 		h.discordBot = discordbot.NewClient(botToken)
 		h.discordLinks = discordbot.NewDiscordLinkTokens(jwtSecret, discordbot.DiscordLinkTTL)
 		h.discordPublicKey = publicKey
 		h.discordApplicationID = applicationID
+	case botToken != "" || applicationID != "" || publicKey != "" || guildID != "":
+		log.Print("discord: DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID, DISCORD_PUBLIC_KEY, and DISCORD_GUILD_ID must all be set together — feature disabled")
 	}
 	return h
 }
@@ -161,6 +164,11 @@ func (h *discordHandlers) DiscordInteraction(c *fiber.Ctx) error {
 	sig := c.Get("X-Signature-Ed25519")
 	timestamp := c.Get("X-Signature-Timestamp")
 	if !discordbot.VerifySignature(h.discordPublicKey, []byte(timestamp), body, sig) {
+		// Deliberately no signature, timestamp, or body in the log line: this endpoint is
+		// unauthenticated and reachable by anyone, so nothing attacker-controlled belongs in it —
+		// only the fixed fact that verification failed, which is what tells a stale/rotated
+		// DISCORD_PUBLIC_KEY apart from an inert (unconfigured) feature in journalctl.
+		log.Print("discord: interaction signature verification failed")
 		return fiber.NewError(fiber.StatusForbidden, "forbidden")
 	}
 
