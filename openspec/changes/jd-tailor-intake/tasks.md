@@ -17,15 +17,15 @@
 
 ## 3. URL/text resolution branching
 
-- [ ] 3.1 Add a resolver that classifies a submitted `url`: recognized ATS (host-scoped
+- [x] 3.1 Add a resolver that classifies a submitted `url`: recognized ATS (host-scoped
       `internal/linksource` adapter or `internal/atsboard` board coverage) vs. generic scrape /
       unreadable — reusing `linkimport`'s resolution step directly, without its contribution-
       reward recording.
-- [ ] 3.2 Wire the recognized-ATS branch to the existing `pipeline.UpsertJob` write path (public,
+- [x] 3.2 Wire the recognized-ATS branch to the existing `pipeline.UpsertJob` write path (public,
       enrichment-queued, indexed — identical to normal ingest).
-- [ ] 3.3 Wire the generic/unrecognized-URL branch and the plain-`text` branch to the private-job
+- [x] 3.3 Wire the generic/unrecognized-URL branch and the plain-`text` branch to the private-job
       writer from 2.2; an unreadable/unparseable URL yields no row.
-- [ ] 3.4 Integration tests: known `job_slug` passthrough; recognized-ATS URL → public job;
+- [x] 3.4 Integration tests: known `job_slug` passthrough; recognized-ATS URL → public job;
       generic/unrecognized URL → private job; unreadable URL → no row; plain text → private job;
       the same text submitted by two different users → two independent private rows.
 
