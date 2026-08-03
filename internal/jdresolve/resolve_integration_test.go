@@ -168,6 +168,40 @@ func TestResolve_RecognizedATSURLBecomesAPublicJob(t *testing.T) {
 	}
 }
 
+// Resubmitting a URL the catalog already carries under its (source, external_id) must
+// resolve to the SAME job, not a duplicate — Write's UpsertJob dedups on that key, and
+// resolveURL must surface that idempotency, not just "a" slug.
+func TestResolve_RecognizedATSURLForAnAlreadyCarriedPostingDedups(t *testing.T) {
+	pool := testdb.Pool(t)
+	q := db.New(pool)
+	ctx := context.Background()
+
+	im := linkimport.New(pool, q, nil, pageClient{body: plainPage},
+		map[string]sources.Source{"recruitee": boardServing("Senior Go Engineer")}, nil)
+	r := jdresolve.New(q, im, nil)
+	url := "https://acme.recruitee.com/o/senior-go"
+
+	first, err := r.Resolve(ctx, 1, jdresolve.Request{URL: url})
+	if err != nil {
+		t.Fatalf("first Resolve: %v", err)
+	}
+	second, err := r.Resolve(ctx, 1, jdresolve.Request{URL: url})
+	if err != nil {
+		t.Fatalf("second Resolve: %v", err)
+	}
+	if second != first {
+		t.Errorf("second Resolve = %q, want the same slug %q", second, first)
+	}
+
+	var rows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM jobs`).Scan(&rows); err != nil {
+		t.Fatalf("count jobs: %v", err)
+	}
+	if rows != 1 {
+		t.Errorf("catalog holds %d jobs, want 1 — re-resolving the same URL must not duplicate it", rows)
+	}
+}
+
 func TestResolve_GenericURLBecomesAPrivateJob(t *testing.T) {
 	pool := testdb.Pool(t)
 	q := db.New(pool)
@@ -260,6 +294,16 @@ func TestResolve_PastedTextBecomesAPrivateJob(t *testing.T) {
 	}
 	if !isPrivate {
 		t.Error("is_private = false, want true")
+	}
+
+	var queued int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM enrichment_outbox o JOIN jobs j ON j.id = o.job_id
+		WHERE j.public_slug = $1`, slug).Scan(&queued); err != nil {
+		t.Fatalf("read enrichment queue: %v", err)
+	}
+	if queued != 0 {
+		t.Errorf("enrichment queue holds %d rows for a private job, want 0", queued)
 	}
 }
 

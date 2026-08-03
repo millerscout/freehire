@@ -111,6 +111,11 @@ func (r *Resolver) resolveURL(ctx context.Context, userID int64, url string) (st
 		if err != nil {
 			return "", fmt.Errorf("jdresolve: write resolved job: %w", err)
 		}
+		// *linkimport.Importer.Write never returns ok=false with a nil error — every
+		// failure path there carries an error. This guards the Importer interface's
+		// documented contract, not a reachable case against the concrete
+		// implementation; a future Importer must not use ok=false/err=nil to mean
+		// anything other than "nothing readable", or this would mislabel it.
 		if !ok {
 			return "", ErrUnreadableURL
 		}
