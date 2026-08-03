@@ -49,11 +49,18 @@ An inbox that silently drops `other` is one where a misclassification cannot be 
 omitted, and one control shows them. Unclassified mail is never hidden: nothing has judged
 it.
 
-### The candidate's own mail is excluded at the query
+### The candidate's own mail is excluded at the query, and storage was already safe
 
-Nine of 42 sampled misses were the candidate's own replies. `gmailsync` already holds the
-connected address for exactly this reason while walking threads; the widened top-level query
-needs the same exclusion, or every conversation is stored twice.
+Nine of 42 sampled misses were the candidate's own replies. It is worth being exact about
+what that costs, because the first draft of this design was wrong about it:
+`worker.go` already drops them before storing (`strings.EqualFold(msg.FromAddr, u.Email)`),
+so nothing was ever going to be stored twice.
+
+What they cost is the fetch. Every one is a message id listed and a full message body
+retrieved, only to be discarded — and under a widened query they compete for the page the
+search returns. Excluding them at the query is therefore an efficiency measure with no
+behavioural change, which is the honest reason to do it and a much smaller one than
+"correctness".
 
 ## Risks / Trade-offs
 

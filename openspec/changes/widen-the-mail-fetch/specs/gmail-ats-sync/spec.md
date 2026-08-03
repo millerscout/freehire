@@ -12,9 +12,9 @@ where a hiring-shaped query found 1151: the misses were near misses, an acknowle
 reading "we've received your … application" where the list knew only "your application at",
 and an invitation reading "interview invite" where it knew only "invite you to interview".
 
-The sync SHALL NOT ingest messages the connected account itself sent. The worker already
-skips them while walking a thread; a top-level fetch that did not would store both halves
-of every conversation.
+The sync SHALL NOT ingest messages the connected account itself sent, and SHOULD NOT fetch
+them. The storage guard already exists; the fetch-side exclusion is what stops those
+messages consuming the query's results and a body retrieval each.
 
 #### Scenario: Mail from an ATS sender is ingested
 
@@ -32,10 +32,11 @@ of every conversation.
 - **WHEN** the mailbox holds mail from an unrecognised sender with no recognised phrasing
 - **THEN** that mail is never fetched or stored
 
-#### Scenario: The candidate's own mail is not ingested
+#### Scenario: The candidate's own mail is neither fetched nor stored
 
 - **WHEN** the mailbox holds a message the connected account sent
-- **THEN** it is not stored, whether or not its text is hiring-shaped
+- **THEN** the query does not ask for it
+- **AND** it is not stored, whether or not its text is hiring-shaped
 
 ## REMOVED Requirements
 

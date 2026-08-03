@@ -6,8 +6,9 @@
       multilingual entries and adding their obvious siblings. Tests assert each new phrase
       appears in the built query and that the existing ones survive.
 - [ ] 1.2 Exclude the connected account's own mail from the query (`-from:<address>`), and
-      test it: the address is already carried for thread walking, and a top-level fetch
-      without it stores both halves of every conversation.
+      test it. NOTE, corrected during implementation: `worker.go:128` already drops these
+      before storing, so this changes no stored data — it stops the widened query spending
+      its page and a body retrieval each on mail that is discarded on arrival.
 - [ ] 1.3 Test that the query stays a single well-formed clause as the list grows — the
       phrases are OR-ed inside one group and the exclusion sits outside it.
 
