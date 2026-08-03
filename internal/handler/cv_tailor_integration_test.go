@@ -550,3 +550,43 @@ func TestTailorCVBootstrapIsIdempotentPerVacancy(t *testing.T) {
 		t.Errorf("tailor debits = %d, want 1 — a reload is not a second purchase", debits)
 	}
 }
+
+// seedPrivateJobSlug seeds a jd-tailor-intake private job (is_private = true, created_by
+// set) — the jd-tailor-intake private-JD path.
+func seedPrivateJobSlug(t *testing.T, pool *pgxpool.Pool, slug string, createdBy int64) int64 {
+	t.Helper()
+	var id int64
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO jobs (source, external_id, url, title, public_slug, is_private, created_by)
+		 VALUES ('pasted', $1, '', 'Backend Engineer', $1, true, $2) RETURNING id`,
+		slug, createdBy).Scan(&id); err != nil {
+		t.Fatalf("seed private job: %v", err)
+	}
+	return id
+}
+
+// TestTailorCVBootstrap_PrivateJobGate: a private job not owned by the caller is rejected
+// exactly as an unknown vacancy (404) — not the 409 cachedAnalysis would otherwise report,
+// which would leak that the slug exists. Its owner reaches the normal flow past the gate.
+func TestTailorCVBootstrap_PrivateJobGate(t *testing.T) {
+	h, iss, pool := newTailorAPI(t)
+	app := buildTailorApp(h, iss)
+
+	owner := seedAccount(t, pool, "owner@example.test", true)
+	stranger := seedAccount(t, pool, "stranger@example.test", true)
+	seedPrivateJobSlug(t, pool, "owners-private-jd", owner)
+
+	strangerTok, _ := iss.Issue(stranger, testTokenVersion)
+	if resp := doCV(t, app, fiber.MethodPost, "/api/v1/me/cvs/tailor", strangerTok,
+		tailorCVRequest{JobSlug: "owners-private-jd"}); resp.StatusCode != fiber.StatusNotFound {
+		t.Fatalf("stranger tailoring a private job = %d, want 404", resp.StatusCode)
+	}
+
+	ownerTok, _ := iss.Issue(owner, testTokenVersion)
+	// No cached analysis yet — the SAME 409 any owner of any job would get without one,
+	// proving the owner passed the visibility gate to reach the normal precondition check.
+	if resp := doCV(t, app, fiber.MethodPost, "/api/v1/me/cvs/tailor", ownerTok,
+		tailorCVRequest{JobSlug: "owners-private-jd"}); resp.StatusCode != fiber.StatusConflict {
+		t.Fatalf("owner tailoring their own private job (no analysis yet) = %d, want 409", resp.StatusCode)
+	}
+}

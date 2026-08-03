@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/strelov1/freehire/internal/auth"
 	"github.com/strelov1/freehire/internal/db"
@@ -76,12 +77,19 @@ func (h *jobsHandlers) ListJobs(c *fiber.Ctx) error {
 	return listResponse(c, views, total, limit, offset)
 }
 
-// GetJob returns a single job addressed by its public slug.
+// GetJob returns a single job addressed by its public slug. A private job (see
+// jobs.is_private) not owned by the caller is answered exactly as if the slug did not
+// exist — mw.optional attaches the caller when signed in but never rejects, so an
+// anonymous request is checked against jobVisibleTo the same way.
 func (h *jobsHandlers) GetJob(c *fiber.Ctx) error {
 	job, err := h.queries.GetJobBySlug(c.Context(), c.Params("slug"))
 	if err != nil {
 		// RenderError maps pgx.ErrNoRows to 404, anything else to 500.
 		return err
+	}
+	callerID, authenticated := auth.UserID(c)
+	if !jobVisibleTo(job, callerID, authenticated) {
+		return pgx.ErrNoRows
 	}
 
 	view, err := jobview.FromRow(job)

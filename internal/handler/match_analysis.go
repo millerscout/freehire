@@ -132,6 +132,9 @@ func (h *matchHandlers) GetMatchAnalysis(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	if !jobVisibleTo(job, userID, true) {
+		return pgx.ErrNoRows
+	}
 	cvUploadedAt, hasCV := h.cvUploadedAt(c, userID)
 	if !hasCV {
 		// No CV means no analysis is possible, so usage is moot — skip the count query.
@@ -169,6 +172,9 @@ func (h *matchHandlers) PostMatchAnalysis(c *fiber.Ctx) error {
 	job, err := h.queries.GetJobBySlug(c.Context(), c.Params("slug"))
 	if err != nil {
 		return err
+	}
+	if !jobVisibleTo(job, userID, true) {
+		return pgx.ErrNoRows
 	}
 	cvUploadedAt, hasCV := h.cvUploadedAt(c, userID)
 	if !hasCV {

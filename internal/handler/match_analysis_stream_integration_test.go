@@ -199,3 +199,59 @@ func TestMatchAnalysisStreamEndpoint(t *testing.T) {
 		}
 	})
 }
+
+// TestMatchAnalysisStreamEndpoint_PrivateJobGate: a private job not owned by the caller is
+// answered 404 before the stream ever opens — the same as an unknown slug.
+func TestMatchAnalysisStreamEndpoint_PrivateJobGate(t *testing.T) {
+	pool := startPostgres(t)
+	ctx := context.Background()
+	queries := db.New(pool)
+
+	var owner, stranger int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (email) VALUES ('stream-owner@example.test') RETURNING id`).Scan(&owner); err != nil {
+		t.Fatalf("seed owner: %v", err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (email) VALUES ('stream-stranger@example.test') RETURNING id`).Scan(&stranger); err != nil {
+		t.Fatalf("seed stranger: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO jobs (source, external_id, url, title, public_slug, is_private, created_by)
+		 VALUES ('pasted', 'sp1', '', 'A private JD', 'stream-private-job', true, $1)`, owner); err != nil {
+		t.Fatalf("seed private job: %v", err)
+	}
+
+	iss := auth.NewIssuer("test-secret", time.Hour)
+	strangerTok, _ := iss.Issue(stranger, testTokenVersion)
+	ownerTok, _ := iss.Issue(owner, testTokenVersion)
+
+	h := &matchHandlers{
+		queries:            queries,
+		userProfile:        userprofile.New(ownedProfile()),
+		resume:             resume.New(nil, &fakeResumeRepo{}),
+		matchAnalysis:      matchanalysis.NewAnalyzer(nil),
+		matchAnalysisCache: queries,
+		credits:            credits.NewStore(queries, pool, credits.Config{MonthlyGrant: 20, CostMatch: 1, CostTailor: 3}),
+	}
+	app := fiber.New(fiber.Config{ErrorHandler: RenderError})
+	app.Get("/api/v1/jobs/:slug/fit/stream", auth.RequireAuth(iss, testVersions), h.StreamMatchAnalysis)
+
+	get := func(tok string) int {
+		req := httptest.NewRequest(fiber.MethodGet, "/api/v1/jobs/stream-private-job/fit/stream", nil)
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok})
+		resp, err := app.Test(req, 5000)
+		if err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if status := get(strangerTok); status != fiber.StatusNotFound {
+		t.Errorf("stranger stream = %d, want 404", status)
+	}
+	if status := get(ownerTok); status != fiber.StatusOK {
+		t.Errorf("owner stream = %d, want 200 (no CV -> meta-only stream)", status)
+	}
+}

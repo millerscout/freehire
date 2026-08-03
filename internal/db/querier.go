@@ -1535,6 +1535,13 @@ type Querier interface {
 	// Newest-added first: created_at is when the job entered the catalogue (stable
 	// across re-ingests), so fresh ingests surface on top regardless of how old the
 	// platform's posted_at is. id breaks ties within one ingest batch.
+	//
+	// AND NOT is_private excludes the jd-tailor-intake private-job path (visible only to
+	// its creator, through GetJobBySlug, not this listing). The partial index backing this
+	// query's ORDER BY (jobs_open_created_idx) predicates on closed_at IS NULL only, not
+	// is_private — Postgres can still use it here since that predicate is implied by this
+	// WHERE clause, applying the is_private filter on the (small) scanned window rather than
+	// the whole table, so this stays index-served rather than degrading to a full scan.
 	ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, error)
 	// duplicate_of IS NULL collapses role-cluster reposts to their canonical row, matching
 	// the /jobs list so a company page shows one card per role, not every repost.

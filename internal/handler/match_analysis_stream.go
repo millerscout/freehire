@@ -13,6 +13,7 @@ import (
 	"github.com/getsentry/sentry-go"
 	sentryfiber "github.com/getsentry/sentry-go/fiber"
 	"github.com/gofiber/fiber/v2"
+	"github.com/jackc/pgx/v5"
 	"github.com/valyala/fasthttp"
 
 	"github.com/strelov1/freehire/internal/credits"
@@ -34,6 +35,9 @@ func (h *matchHandlers) StreamMatchAnalysis(c *fiber.Ctx) error {
 	job, err := h.queries.GetJobBySlug(c.Context(), c.Params("slug"))
 	if err != nil {
 		return err
+	}
+	if !jobVisibleTo(job, userID, true) {
+		return pgx.ErrNoRows
 	}
 	cvUploadedAt, hasCV := h.cvUploadedAt(c, userID)
 	// Gate on points before opening the stream (the fiber ctx is still valid here, so an

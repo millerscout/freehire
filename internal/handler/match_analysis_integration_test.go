@@ -241,6 +241,73 @@ func TestMatchAnalysisEndpoints(t *testing.T) {
 	})
 }
 
+// TestMatchAnalysisEndpoints_PrivateJobGate: a private job (jd-tailor-intake) not owned by
+// the caller is answered 404 by both GET and POST — the same as an unknown slug — while its
+// owner reaches the normal has_cv:false 200 (no résumé seeded, so neither endpoint ever
+// touches the LLM either way).
+func TestMatchAnalysisEndpoints_PrivateJobGate(t *testing.T) {
+	pool := startPostgres(t)
+	ctx := context.Background()
+	queries := db.New(pool)
+
+	var owner, stranger int64
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (email) VALUES ('fit-owner@example.test') RETURNING id`).Scan(&owner); err != nil {
+		t.Fatalf("seed owner: %v", err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (email) VALUES ('fit-stranger@example.test') RETURNING id`).Scan(&stranger); err != nil {
+		t.Fatalf("seed stranger: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO jobs (source, external_id, url, title, public_slug, is_private, created_by)
+		 VALUES ('pasted', 'p1', '', 'A private JD', 'fit-private-job', true, $1)`, owner); err != nil {
+		t.Fatalf("seed private job: %v", err)
+	}
+
+	iss := auth.NewIssuer("test-secret", time.Hour)
+	ownerTok, _ := iss.Issue(owner, testTokenVersion)
+	strangerTok, _ := iss.Issue(stranger, testTokenVersion)
+
+	h := fitAPI(pool, queries, iss, resume.New(nil, &fakeResumeRepo{}), matchanalysis.NewAnalyzer(nil))
+	app := fiber.New(fiber.Config{ErrorHandler: RenderError})
+	g := auth.RequireAuth(iss, testVersions)
+	app.Get("/api/v1/jobs/:slug/fit", g, h.GetMatchAnalysis)
+	app.Post("/api/v1/jobs/:slug/fit", g, h.PostMatchAnalysis)
+
+	get := func(tok string) *http.Response {
+		req := httptest.NewRequest(fiber.MethodGet, "/api/v1/jobs/fit-private-job/fit", nil)
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok})
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("GET fit: %v", err)
+		}
+		return resp
+	}
+	post := func(tok string) *http.Response {
+		req := httptest.NewRequest(fiber.MethodPost, "/api/v1/jobs/fit-private-job/fit", nil)
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok})
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatalf("POST fit: %v", err)
+		}
+		return resp
+	}
+
+	if resp := get(strangerTok); resp.StatusCode != fiber.StatusNotFound {
+		t.Errorf("stranger GET fit = %d, want 404", resp.StatusCode)
+	}
+	if resp := post(strangerTok); resp.StatusCode != fiber.StatusNotFound {
+		t.Errorf("stranger POST fit = %d, want 404", resp.StatusCode)
+	}
+	if resp := get(ownerTok); resp.StatusCode != fiber.StatusOK {
+		t.Errorf("owner GET fit = %d, want 200", resp.StatusCode)
+	}
+	if resp := post(ownerTok); resp.StatusCode != fiber.StatusOK {
+		t.Errorf("owner POST fit = %d, want 200", resp.StatusCode)
+	}
+}
+
 // TestMatchAnalysisCredits covers the points gate on the match feature: a new job with no points
 // is a 402 (no LLM call, nothing persisted), a recompute of an already-analyzed job is
 // always free, a fresh analysis debits one point, and GET reports the balance.

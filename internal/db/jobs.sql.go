@@ -1082,7 +1082,7 @@ func (q *Queries) ListJobSitemapFreshest(ctx context.Context, rowLimit int32) ([
 const listJobs = `-- name: ListJobs :many
 SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private
 FROM jobs
-WHERE closed_at IS NULL AND duplicate_of IS NULL
+WHERE closed_at IS NULL AND duplicate_of IS NULL AND NOT is_private
 ORDER BY created_at DESC, id DESC
 LIMIT $1 OFFSET $2
 `
@@ -1095,6 +1095,13 @@ type ListJobsParams struct {
 // Newest-added first: created_at is when the job entered the catalogue (stable
 // across re-ingests), so fresh ingests surface on top regardless of how old the
 // platform's posted_at is. id breaks ties within one ingest batch.
+//
+// AND NOT is_private excludes the jd-tailor-intake private-job path (visible only to
+// its creator, through GetJobBySlug, not this listing). The partial index backing this
+// query's ORDER BY (jobs_open_created_idx) predicates on closed_at IS NULL only, not
+// is_private — Postgres can still use it here since that predicate is implied by this
+// WHERE clause, applying the is_private filter on the (small) scanned window rather than
+// the whole table, so this stays index-served rather than degrading to a full scan.
 func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, error) {
 	rows, err := q.db.Query(ctx, listJobs, arg.Limit, arg.Offset)
 	if err != nil {
