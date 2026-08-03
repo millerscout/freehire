@@ -14,13 +14,16 @@
 
 ## 2. The listing
 
-- [ ] 2.1 Add the hide predicate and the hidden count to `ListEmails`/`CountEmails` in
+- [x] 2.1 Add the hide predicate and the hidden count to `ListEmails`/`CountEmails` in
       `internal/db/queries/gmail.sql`: omit `status_signal = 'other'` unless asked, never
       omit an unclassified message, and report how many were omitted under the same filters.
       `make sqlc`.
-- [ ] 2.2 Carry the option and the count through `inbox.Query` / `inbox.Page`, with unit
-      tests for the default (hidden), the opt-in (shown), and the unclassified case.
-- [ ] 2.3 Integration test over a real Postgres: a mailbox holding `other`, a signal, and an
+- [x] 2.2 Carry the option and the count through `inbox.Query` / `inbox.Page`, with unit
+      tests for the default (hidden), the opt-in (shown), and the unclassified case. Found
+      during implementation: `?status=other` and the hide default cancelled each other and
+      returned an empty page, so asking FOR the label now overrides the default
+      (`Query.showsOther`).
+- [x] 2.3 Integration test over a real Postgres: a mailbox holding `other`, a signal, and an
       unclassified message lists two by default and three when asked, and reports one hidden.
 
 ## 3. HTTP and web
