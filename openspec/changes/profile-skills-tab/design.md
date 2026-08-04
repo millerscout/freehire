@@ -122,10 +122,12 @@ scenario added to the spec delta.
   write resolves and the component would show the note, the remount may already
   have replaced it with a fresh instance. → **Mitigation**: the DATA is
   unaffected (this is display-only, unlike the specialization-loss bug), and the
-  result is directly visible on the Skills tab regardless. Verify empirically
-  in a browser during task 5 (Verification) rather than guessing at Svelte's
-  effect-flush timing; not worth a structural fix (e.g. lifting the note to the
-  parent) unless that verification shows it matters in practice.
+  result is directly visible on the Skills tab regardless. Meant to be verified
+  empirically in a browser during task 5 (Verification) rather than guessed at
+  from Svelte's effect-flush timing — that verification was skipped (see task
+  5's notes), so this remains unconfirmed either way. Not worth a structural
+  fix (e.g. lifting the note to the parent) unless a future check shows it
+  matters in practice.
 
 ## Migration Plan
 

@@ -20,7 +20,7 @@
 
 ## 5. Verification
 
-- [ ] 5.1 `go vet ./...` and the web build/lint/check scripts pass (no backend behavior changed, but confirm nothing else broke).
-- [ ] 5.2 Manual: create a profile from scratch — Role and Skills still required together in the set-up form, Save gating unchanged.
-- [ ] 5.3 Manual: edit an existing profile — toggle a skill and an avoided skill on the new Skills tab, confirm each persists immediately with no Save click and survives a reload; spot-check the disabled-while-pending and error states.
-- [ ] 5.4 Manual: upload a CV against an existing profile — confirm extracted skills land in the profile automatically and are visible on the Skills tab, without touching Settings' Save.
+- [x] 5.1 `go vet ./...` and the web build/lint/check scripts pass (no backend behavior changed, but confirm nothing else broke). Verified: `go build ./...`, `go vet ./...`, `pnpm run build`, `pnpm run check` (0 errors), `pnpm run lint` (exit 0, no touched-file findings), `pnpm exec vitest run` (830/830) all green.
+- [ ] 5.2 Manual: create a profile from scratch — Role and Skills still required together in the set-up form, Save gating unchanged. **Skipped**: user opted out of standing up a full local stack (Postgres/Meilisearch/env) for browser QA in this worktree, given the automated coverage above plus two rounds of independent code review. Not verified in a live browser.
+- [ ] 5.3 Manual: edit an existing profile — toggle a skill and an avoided skill on the new Skills tab, confirm each persists immediately with no Save click and survives a reload; spot-check the disabled-while-pending and error states. **Skipped**, same reason as 5.2.
+- [ ] 5.4 Manual: upload a CV against an existing profile — confirm extracted skills land in the profile automatically and are visible on the Skills tab, without touching Settings' Save. **Skipped**, same reason as 5.2. This was also meant to empirically settle whether `resumeNote` renders under the `{#key profile.updated_at}` remount timing (see `design.md`'s residual-risk entry) — that question remains open.
