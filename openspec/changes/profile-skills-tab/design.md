@@ -71,6 +71,20 @@ universe — `api.facetCounts` → sort by descending job count. Extracted to
 `web/src/lib/skillDictionary.ts` (`loadSkillDistribution(): Promise<FacetOption[]>`)
 rather than duplicated, since it's now needed in two independent components.
 
+**The Skills tab refuses to remove or avoid a profile's one remaining skill,
+client-side, before attempting a write.**
+`normalizeSkills` (`internal/userprofile/userprofile.go`) requires a non-empty
+skill set on every save, not only at creation — `Save` is the single path both
+flows go through. Without a `ProfileForm`-style Save-button gate, an autosaving
+Skills tab has no other checkpoint before the request goes out, so removing (or
+avoiding, which also un-claims) the last skill would always come back a 400.
+Caught in `SkillsView.svelte` before the call: `skills.length === 1 &&
+skills.includes(skill)` blocks the toggle and shows a message that a skill is
+required, instead of sending a request that cannot succeed and reporting it
+through the generic (retry-implying) failed-write copy. Found during review of
+task 3 — see the "Removing the one remaining skill is refused client-side"
+scenario added to the spec delta.
+
 ## Risks / Trade-offs
 
 - **[Risk]** A user toggles a skill on the new tab while `ProfileForm`'s

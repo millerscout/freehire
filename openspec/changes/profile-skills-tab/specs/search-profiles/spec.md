@@ -77,7 +77,12 @@ un-claim it if it was claimed — a skill is never in both sets. While a write f
 one toggle is in flight, the Skills tab's controls SHALL be disabled so a second
 toggle cannot be started against a stale pre-write state. A write that fails
 SHALL leave the profile's stored skills unchanged and SHALL show an inline error
-naming the skill that failed.
+naming the skill that failed. The server requires at least one skill on every
+save, not only at profile creation — removing the profile's one remaining skill,
+or avoiding it (which also un-claims it), would always be rejected. The Skills
+tab SHALL refuse that specific toggle client-side, without attempting the write,
+and SHALL show a message stating a skill is required rather than the generic
+retry error.
 
 #### Scenario: Claiming a skill autosaves
 - **WHEN** a signed-in user with an existing profile toggles on a skill on the Skills tab
@@ -94,3 +99,7 @@ naming the skill that failed.
 #### Scenario: A failed write is surfaced without silently reverting
 - **WHEN** a signed-in user toggles a skill on the Skills tab and the save request fails
 - **THEN** the profile's stored skills remain whatever they were before the toggle, and the tab shows an inline error naming the skill
+
+#### Scenario: Removing the one remaining skill is refused client-side
+- **WHEN** a signed-in user's profile holds exactly one skill and they try to remove it, or to mark it as avoided, on the Skills tab
+- **THEN** no write is sent to the server, the skill remains in the profile's `skills`, and the tab shows a message that a skill is required
