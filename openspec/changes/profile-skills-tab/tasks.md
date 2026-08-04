@@ -4,8 +4,8 @@
 
 ## 2. Shared skill-dictionary loader
 
-- [ ] 2.1 Extract the skills-typeahead fetch+sort (`api.facetCounts` → `FacetOption[]` sorted by descending count) out of `ProfileForm.svelte`'s `loadSkills()` into `web/src/lib/skillDictionary.ts`, exporting `loadSkillDistribution(): Promise<FacetOption[]>`.
-- [ ] 2.2 Update `ProfileForm.svelte` to call the shared loader instead of its inline copy.
+- [x] 2.1 Extract the skills-typeahead fetch+sort (`api.facetCounts` → `FacetOption[]` sorted by descending count) out of `ProfileForm.svelte`'s `loadSkills()` into `web/src/lib/skillDictionary.ts`, exporting `loadSkillDistribution(): Promise<FacetOption[]>`.
+- [x] 2.2 Update `ProfileForm.svelte` to call the shared loader instead of its inline copy.
 
 ## 3. New Skills tab
 
