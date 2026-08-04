@@ -12,6 +12,7 @@
   import { categoryLabel } from '$lib/labels';
   import { profileStore } from '$lib/profile.svelte';
   import { buildLocationPreferences } from '$lib/profileLocation';
+  import { loadSkillDistribution } from '$lib/skillDictionary';
   import type { LocationPreferences, UserProfile } from '$lib/types';
   import { Button, Input } from '$lib/ui';
   import HeadshotField from './HeadshotField.svelte';
@@ -133,20 +134,8 @@
   const searchSkills = (query: string) => searchSkillsExcept(query, excludedSkills);
   const searchExcludedSkills = (query: string) => searchSkillsExcept(query, skills);
 
-  async function loadSkills() {
-    try {
-      const counts = await api.facetCounts(new URLSearchParams());
-      const dist = counts.facets?.skills ?? {};
-      skillDist = Object.entries(dist)
-        .map(([value, count]) => ({ value, label: value, count }))
-        .toSorted((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-    } catch {
-      // best-effort: the typeahead just has nothing to suggest.
-    }
-  }
-
   $effect(() => {
-    void loadSkills();
+    void loadSkillDistribution().then((dist) => (skillDist = dist));
   });
 
   // Derive skills + specialization from a résumé PDF and merge them into the fields as a
