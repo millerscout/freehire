@@ -1,4 +1,13 @@
-## ADDED Requirements
+# tailor-claim-confirmation Specification
+
+## Purpose
+
+Confirming a claim the experience bank holds no evidence for, during CV tailoring, so the
+transcript ends up with a verbatim candidate message the existing `stated_in_chat`
+provenance check can match — without the candidate ever having to type or paste a claim
+back by hand.
+
+## Requirements
 
 ### Requirement: The tailoring agent requests confirmation through a dedicated tool, not free text
 
