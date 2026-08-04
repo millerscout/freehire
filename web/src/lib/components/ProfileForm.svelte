@@ -12,6 +12,7 @@
   import { categoryLabel } from '$lib/labels';
   import { profileStore } from '$lib/profile.svelte';
   import { buildLocationPreferences } from '$lib/profileLocation';
+  import { withSkills } from '$lib/profileSkills';
   import { loadSkillDistribution } from '$lib/skillDictionary';
   import type { LocationPreferences, UserProfile } from '$lib/types';
   import { Button, Input } from '$lib/ui';
@@ -143,13 +144,15 @@
     void loadSkillDistribution().then((dist) => (skillDist = dist));
   });
 
-  // Derive skills + specialization from a résumé PDF. Specializations always merge into the
-  // local field, respecting the cap, saved together with Role on the next Save click. Skills
-  // differ by mode: before a profile exists, they merge into the local field the same way
-  // (Save persists both together, since a profile needs both up front); once a profile
-  // exists, Skills has moved to its own autosaving tab, so extracted skills are written
-  // straight to the profile in one bulk PUT instead of buffering into a field that no longer
-  // renders here. The upload also stores the CV server-side, so notify the parent to refresh
+  // Derive skills + specialization from a résumé PDF. Before a profile exists, both merge
+  // into local fields the same way (a profile needs both up front, so Save persists them
+  // together). Once a profile exists, Skills has moved to its own autosaving tab, so the
+  // extraction writes both fields straight to the profile in one PUT instead: not skills
+  // alone, because a specialization it also resolved would otherwise sit in this
+  // component's local (unsaved) state right as a skills-only write's reseed discards it —
+  // this component is keyed on the profile's own `updated_at` (see +page.svelte), so any
+  // write to the row remounts it fresh from the server, wiping whatever wasn't included in
+  // that write. The upload also stores the CV server-side, so notify the parent to refresh
   // the CV-readiness state.
   async function analyzeResume(file: File) {
     resumeBusy = true;
@@ -160,38 +163,45 @@
       track('cv_upload', { ok: true, origin: 'profile' });
       onCvUploaded?.();
 
+      // Merge every specialization the CV resolved, respecting the cap; track how many
+      // were added vs. left out by the cap so the note is accurate. Always local first —
+      // `nextSpecializations` is what an editing-mode write below persists alongside skills.
+      let addedSpecs = 0;
+      let cappedSpecs = 0; // resolved but the cap left no room
+      const nextSpecializations = [...specializations];
+      for (const cat of cv.categories) {
+        if (nextSpecializations.includes(cat)) continue;
+        if (nextSpecializations.length < MAX_SPECIALIZATIONS) {
+          nextSpecializations.push(cat);
+          addedSpecs++;
+        } else {
+          cappedSpecs++;
+        }
+      }
+      specializations = nextSpecializations;
+
       let addedSkills: number;
       if (editing) {
-        const before = new Set(skills);
-        addedSkills = cv.skills.filter((s) => !before.has(s)).length;
-        if (addedSkills > 0) await profileStore.addSkills(cv.skills);
+        const current = profileStore.profile;
+        const before = current?.skills ?? [];
+        addedSkills = current ? withSkills(current, cv.skills).skills.length - before.length : 0;
+        if (addedSkills > 0 || addedSpecs > 0) {
+          await profileStore.mergeResumeExtraction(cv.skills, nextSpecializations);
+        }
       } else {
         const beforeSkills = skills.length;
         skills = [...new Set([...skills, ...cv.skills])];
         addedSkills = skills.length - beforeSkills;
       }
 
-      // Merge every specialization the CV resolved, respecting the cap; track how many
-      // were added vs. left out by the cap so the note is accurate.
-      let addedSpecs = 0;
-      let cappedSpecs = 0; // resolved but the cap left no room
-      for (const cat of cv.categories) {
-        if (specializations.includes(cat)) continue;
-        if (specializations.length < MAX_SPECIALIZATIONS) {
-          specializations = [...specializations, cat];
-          addedSpecs++;
-        } else {
-          cappedSpecs++;
-        }
-      }
-
       const parts: string[] = [];
       if (addedSkills > 0) parts.push(`${addedSkills} skill${addedSkills === 1 ? '' : 's'}`);
       if (addedSpecs > 0) parts.push(`${addedSpecs} specialization${addedSpecs === 1 ? '' : 's'}`);
       if (parts.length) {
-        resumeNote = editing
-          ? `Added ${parts.join(' and ')} from your CV — see the Skills tab.`
-          : `Added ${parts.join(' and ')} from your CV.`;
+        resumeNote =
+          editing && addedSkills > 0
+            ? `Added ${parts.join(' and ')} from your CV — see the Skills tab.`
+            : `Added ${parts.join(' and ')} from your CV.`;
       } else if (cappedSpecs > 0)
         resumeNote = `Reached the ${MAX_SPECIALIZATIONS}-specialization limit — nothing more added.`;
       else if (cv.skills.length === 0 && cv.categories.length === 0) resumeNote = 'No known skills found in the CV.';

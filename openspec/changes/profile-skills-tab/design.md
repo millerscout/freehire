@@ -56,14 +56,27 @@ always show a placeholder/link in Settings pointing at the new tab. Rejected as
 unnecessary indirection — the new top-level tab is one click away in the same
 tab strip.
 
-**CV upload against an existing profile autosaves extracted skills via a new
-bulk mutator, not N sequential single-skill calls.**
-`profileStore.addSkills(skills: string[])` folds `withSkill` over every
-extracted skill and issues one `PUT`, queued through the same `#queue` as the
-other mutators (so it can't race a manual toggle from the Skills tab). Looping
-the existing single-skill `addSkill` was considered and rejected: it would issue
-one full-row `PUT` per extracted skill (5-15 typically), all serialized, for no
-benefit over one bulk write.
+**CV upload against an existing profile autosaves extracted skills AND any
+specialization the same extraction resolved, together, in one write — not two,
+and not N sequential single-skill calls.**
+`profileStore.mergeResumeExtraction(newSkills, specializations)` folds
+`withSkills` over the extracted skills and saves them alongside the caller's
+already-locally-merged specializations, queued through the same `#queue` as the
+other mutators. Two candidates were rejected:
+- Looping the single-skill `addSkill`: one full-row `PUT` per extracted skill
+  (5-15 typically), all serialized, for no benefit over one bulk write.
+- A skills-only bulk mutator (the first version of this decision, `addSkills`,
+  called alone): found in review of task 4 to silently drop any specialization
+  the same CV resolved. `ProfileForm` is wrapped in `{#key profile.updated_at}`
+  (`+page.svelte`), so ANY write to the profile row remounts it fresh from the
+  server — including a write this same component triggers for skills alone. A
+  specialization merged into `ProfileForm`'s local (unsaved) state moments
+  earlier, in the same `analyzeResume()` call, would still be sitting in that
+  local state when the remount discarded it — the user would never get a
+  chance to save it via the visible Role field, because the field's own
+  component instance is already gone. Committing specializations in the SAME
+  write as the skills closes this: nothing is left in local-only state for the
+  remount to orphan.
 
 **Shared skill-dictionary loader.**
 Both `ProfileForm` (create flow) and `SkillsView` need the same typeahead
@@ -102,6 +115,17 @@ scenario added to the spec delta.
   considered and declined during brainstorming (adds a review UI for a case that
   behaves acceptably today: false extractions can simply be removed on the
   Skills tab, same as an unwanted manual entry).
+- **[Risk]** The same `{#key profile.updated_at}` remount that would have
+  discarded an unsaved specialization (see the decision above) may also mean
+  `ProfileForm`'s own `resumeNote` confirmation ("Added N skills…") never
+  renders for an editing-mode CV upload — by the time `mergeResumeExtraction`'s
+  write resolves and the component would show the note, the remount may already
+  have replaced it with a fresh instance. → **Mitigation**: the DATA is
+  unaffected (this is display-only, unlike the specialization-loss bug), and the
+  result is directly visible on the Skills tab regardless. Verify empirically
+  in a browser during task 5 (Verification) rather than guessing at Svelte's
+  effect-flush timing; not worth a structural fix (e.g. lifting the note to the
+  parent) unless that verification shows it matters in practice.
 
 ## Migration Plan
 

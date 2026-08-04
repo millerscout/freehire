@@ -45,10 +45,16 @@ extract skills from it via the `resume-skill-extraction` capability, merged as a
 union with skills already on the profile (deduplicated) — it SHALL NOT remove or
 overwrite skills already present. Before a profile exists, extracted skills merge
 into the set-up form's in-memory skills field, editable before the first save.
-Once a profile exists, extracted skills SHALL be written to the profile
-immediately (one additional `PUT /api/v1/me/profile` beyond whatever the Settings
-tab itself saves), visible on the Skills tab; the user can remove any unwanted
-extracted skill there afterwards, same as any other skill.
+Once a profile exists, extracted skills — and any specialization the same
+extraction resolved — SHALL be written to the profile together, in one
+additional `PUT /api/v1/me/profile` beyond whatever the Settings tab itself
+saves. Skills and specializations SHALL commit in the SAME write, not two
+separate ones: the Settings tab is remounted from the server's own row on any
+write to it, so a specialization merged only into this component's local state
+by a skills-only write would be discarded, unsaved, before the user could ever
+save it through the visible Role field. Extracted skills are visible on the
+Skills tab; the user can remove any unwanted extracted skill there afterwards,
+same as any other skill.
 
 #### Scenario: Merge extracted skills into an empty set-up form
 - **WHEN** a user with no profile and an empty skills field uploads a resume and extraction returns `[go, postgresql]`
@@ -65,6 +71,10 @@ extracted skill there afterwards, same as any other skill.
 #### Scenario: Extracted skills autosave to an existing profile
 - **WHEN** a user who already has a profile with skills `[docker]` uploads a resume from the Settings tab returning `[go, docker, postgresql]`
 - **THEN** the profile's skills become `[docker, go, postgresql]` immediately, without the user pressing Settings' Save control, and are visible on the Skills tab
+
+#### Scenario: An extraction-resolved specialization commits in the same write as its skills
+- **WHEN** a user who already has a profile uploads a resume that resolves both new skills and a specialization not yet on the profile
+- **THEN** both land in the profile from that single upload, without the user pressing Settings' Save control
 
 ## ADDED Requirements
 
