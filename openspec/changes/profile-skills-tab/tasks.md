@@ -9,9 +9,9 @@
 
 ## 3. New Skills tab
 
-- [ ] 3.1 Create `web/src/lib/components/SkillsView.svelte`: reads `profileStore.profile?.skills` / `?.excluded_skills` reactively (no local buffer), renders the Skills and Skills to avoid `RemoteSearchSelect` blocks (moved from `ProfileForm`, same copy/styling), loads its typeahead universe via `loadSkillDistribution()`.
-- [ ] 3.2 Wire toggle handlers to `profileStore.addSkill`/`removeSkill`/`avoidSkill`/`unavoidSkill`, with a single `pending` boolean disabling both controls while a write is in flight, and a `failed: string | null` rendering `Could not update {failed} in your profile. Try again.` on rejection (mirrors `JobMatch.svelte`).
-- [ ] 3.3 Add `{ id: 'skills', label: 'Skills' }` to `TABS` in `web/src/routes/my/profile/+page.svelte` (after `settings`) and render `<SkillsView />` in the tab body for that id.
+- [x] 3.1 Create `web/src/lib/components/SkillsView.svelte`: reads `profileStore.profile?.skills` / `?.excluded_skills` reactively (no local buffer), renders the Skills and Skills to avoid `RemoteSearchSelect` blocks (moved from `ProfileForm`, same copy/styling), loads its typeahead universe via `loadSkillDistribution()`.
+- [x] 3.2 Wire toggle handlers to `profileStore.addSkill`/`removeSkill`/`avoidSkill`/`unavoidSkill`, with a single `pending` boolean disabling both controls while a write is in flight, and a `failed: string | null` rendering `Could not update {failed} in your profile. Try again.` on rejection (mirrors `JobMatch.svelte`). Also blocks — client-side, before the write — removing or avoiding the profile's one remaining skill, which the server would always reject.
+- [x] 3.3 Add `{ id: 'skills', label: 'Skills' }` to `TABS` in `web/src/routes/my/profile/+page.svelte` (after `settings`) and render `<SkillsView />` in the tab body for that id.
 
 ## 4. Settings form: drop Skills once a profile exists
 
