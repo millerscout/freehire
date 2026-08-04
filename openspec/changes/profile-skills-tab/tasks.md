@@ -1,6 +1,6 @@
 ## 1. Profile store: bulk skill autosave
 
-- [x] 1.1 Add `addSkills(skills: string[])` to `ProfileStore` (`web/src/lib/profile.svelte.ts`): fold `withSkill` (from `profileSkills.ts`) over every new skill and issue a single `PUT` through the existing `#writeSkills`/`#queue` machinery.
+- [x] 1.1 Add `addSkills(skills: string[])` to `ProfileStore` (`web/src/lib/profile.svelte.ts`): fold `withSkill` (from `profileSkills.ts`) over every new skill and issue a single `PUT` through the existing `#writeSkills`/`#queue` machinery. **Superseded in task 4.2**: replaced by `mergeResumeExtraction`, its only call site's needs having grown to include specializations too — see task 4.2's note.
 
 ## 2. Shared skill-dictionary loader
 
@@ -15,8 +15,8 @@
 
 ## 4. Settings form: drop Skills once a profile exists
 
-- [ ] 4.1 In `ProfileForm.svelte`, gate the Skills / Skills to avoid blocks behind `!editing` (keep them for first-time profile creation only); relabel the `main` form-tab from "Skills & role" to "Role" when `editing`.
-- [ ] 4.2 Update `analyzeResume()`: when `!editing`, keep merging extracted skills into the local `skills` buffer (unchanged creation-flow behavior); when `editing`, call `profileStore.addSkills(cv.skills)` directly instead of touching local state. Adjust the `resumeNote` copy for the `editing` case to point at the Skills tab instead of "below".
+- [x] 4.1 In `ProfileForm.svelte`, gate the Skills / Skills to avoid blocks behind `!editing` (keep them for first-time profile creation only); relabel the `main` form-tab from "Skills & role" to "Role" when `editing`.
+- [x] 4.2 Update `analyzeResume()`: when `!editing`, keep merging extracted skills into the local `skills` buffer (unchanged creation-flow behavior); when `editing`, persist extracted skills directly instead of touching local state. Adjust the `resumeNote` copy for the `editing` case to point at the Skills tab instead of "below". **Revised during review**: a skills-only write (the originally-planned `profileStore.addSkills(cv.skills)`) triggers `ProfileForm`'s own `{#key profile.updated_at}` remount and silently discards any specialization the same extraction resolved into local state. Fixed by committing both together via `profileStore.mergeResumeExtraction(cv.skills, nextSpecializations)` (replaces the task-1.1 `addSkills` mutator, since it had no other caller) — see `design.md`'s "CV upload against an existing profile autosaves..." decision.
 
 ## 5. Verification
 

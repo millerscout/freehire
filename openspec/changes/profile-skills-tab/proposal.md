@@ -18,12 +18,13 @@ skill today.
   first-time profile creation (no profile yet, no tabs), Skills stays in the
   creation form alongside Role, since creating a profile still requires at least
   one skill up front.
-- CV upload against an **existing** profile now writes extracted skills straight
-  to the profile (one bulk `PUT`) instead of buffering them in the Settings form
-  until a manual Save. CV upload during first-time creation is unchanged.
-- Add a bulk `addSkills` mutator to the frontend profile store (single PUT for
-  multiple new skills), and a shared skill-dictionary loader used by both the
-  Settings form and the new Skills tab.
+- CV upload against an **existing** profile now writes extracted skills — and
+  any specialization the same extraction resolved — straight to the profile in
+  one PUT, instead of buffering them in the Settings form until a manual Save.
+  CV upload during first-time creation is unchanged.
+- Add a `mergeResumeExtraction` mutator to the frontend profile store (single
+  PUT for new skills plus specializations together), and a shared
+  skill-dictionary loader used by both the Settings form and the new Skills tab.
 - No backend changes: same `PUT /api/v1/me/profile` endpoint, called from a
   different place in the frontend.
 
