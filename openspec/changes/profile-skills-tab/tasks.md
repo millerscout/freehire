@@ -1,6 +1,6 @@
 ## 1. Profile store: bulk skill autosave
 
-- [ ] 1.1 Add `addSkills(skills: string[])` to `ProfileStore` (`web/src/lib/profile.svelte.ts`): fold `withSkill` (from `profileSkills.ts`) over every new skill and issue a single `PUT` through the existing `#writeSkills`/`#queue` machinery.
+- [x] 1.1 Add `addSkills(skills: string[])` to `ProfileStore` (`web/src/lib/profile.svelte.ts`): fold `withSkill` (from `profileSkills.ts`) over every new skill and issue a single `PUT` through the existing `#writeSkills`/`#queue` machinery.
 
 ## 2. Shared skill-dictionary loader
 
