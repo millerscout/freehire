@@ -9,6 +9,7 @@
 import { api } from '$lib/api';
 import {
   withSkill,
+  withSkills,
   withoutSkill,
   withAvoidedSkill,
   withoutAvoidedSkill,
@@ -68,6 +69,13 @@ class ProfileStore extends UserResource<UserProfile | null> {
    *  when the write is refused, leaving the stored copy untouched either way. */
   addSkill(skill: string): Promise<UserProfile> {
     return this.#queue(() => this.#writeSkills((sets) => withSkill(sets, skill)));
+  }
+
+  /** Add several skills at once, in a single write — what a résumé extraction merges into an
+   *  already-existing profile (the set-up form does this itself, unsaved, before there is a
+   *  profile to write to). Rejects when there is no profile, same as `addSkill`. */
+  addSkills(skills: string[]): Promise<UserProfile> {
+    return this.#queue(() => this.#writeSkills((sets) => withSkills(sets, skills)));
   }
 
   /** Take one skill back out — undoing a claim. Subtracts only that skill, so a claim made
