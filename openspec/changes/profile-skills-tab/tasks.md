@@ -1,0 +1,26 @@
+## 1. Profile store: bulk skill autosave
+
+- [ ] 1.1 Add `addSkills(skills: string[])` to `ProfileStore` (`web/src/lib/profile.svelte.ts`): fold `withSkill` (from `profileSkills.ts`) over every new skill and issue a single `PUT` through the existing `#writeSkills`/`#queue` machinery.
+
+## 2. Shared skill-dictionary loader
+
+- [ ] 2.1 Extract the skills-typeahead fetch+sort (`api.facetCounts` → `FacetOption[]` sorted by descending count) out of `ProfileForm.svelte`'s `loadSkills()` into `web/src/lib/skillDictionary.ts`, exporting `loadSkillDistribution(): Promise<FacetOption[]>`.
+- [ ] 2.2 Update `ProfileForm.svelte` to call the shared loader instead of its inline copy.
+
+## 3. New Skills tab
+
+- [ ] 3.1 Create `web/src/lib/components/SkillsView.svelte`: reads `profileStore.profile?.skills` / `?.excluded_skills` reactively (no local buffer), renders the Skills and Skills to avoid `RemoteSearchSelect` blocks (moved from `ProfileForm`, same copy/styling), loads its typeahead universe via `loadSkillDistribution()`.
+- [ ] 3.2 Wire toggle handlers to `profileStore.addSkill`/`removeSkill`/`avoidSkill`/`unavoidSkill`, with a single `pending` boolean disabling both controls while a write is in flight, and a `failed: string | null` rendering `Could not update {failed} in your profile. Try again.` on rejection (mirrors `JobMatch.svelte`).
+- [ ] 3.3 Add `{ id: 'skills', label: 'Skills' }` to `TABS` in `web/src/routes/my/profile/+page.svelte` (after `settings`) and render `<SkillsView />` in the tab body for that id.
+
+## 4. Settings form: drop Skills once a profile exists
+
+- [ ] 4.1 In `ProfileForm.svelte`, gate the Skills / Skills to avoid blocks behind `!editing` (keep them for first-time profile creation only); relabel the `main` form-tab from "Skills & role" to "Role" when `editing`.
+- [ ] 4.2 Update `analyzeResume()`: when `!editing`, keep merging extracted skills into the local `skills` buffer (unchanged creation-flow behavior); when `editing`, call `profileStore.addSkills(cv.skills)` directly instead of touching local state. Adjust the `resumeNote` copy for the `editing` case to point at the Skills tab instead of "below".
+
+## 5. Verification
+
+- [ ] 5.1 `go vet ./...` and the web build/lint/check scripts pass (no backend behavior changed, but confirm nothing else broke).
+- [ ] 5.2 Manual: create a profile from scratch — Role and Skills still required together in the set-up form, Save gating unchanged.
+- [ ] 5.3 Manual: edit an existing profile — toggle a skill and an avoided skill on the new Skills tab, confirm each persists immediately with no Save click and survives a reload; spot-check the disabled-while-pending and error states.
+- [ ] 5.4 Manual: upload a CV against an existing profile — confirm extracted skills land in the profile automatically and are visible on the Skills tab, without touching Settings' Save.
