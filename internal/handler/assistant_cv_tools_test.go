@@ -491,6 +491,96 @@ func TestCVEditWritesACitedBullet(t *testing.T) {
 	}
 }
 
+// cv_edit and tailor_report write two different columns through two different tool calls;
+// nothing ties them together unless cv_edit is told which requirement its batch just closed.
+// requirement/requirement_status is that link — it must land in the SAME call as the edit,
+// because that is the one moment the model still has the requirement in mind.
+func TestCVEditToolMergesTheClosedRequirementIntoTheReport(t *testing.T) {
+	bank := newStubBank()
+	atom := bank.add(3, experience.Atom{Claim: "Senior backend engineer", Provenance: experience.ProvenanceStatedInChat})
+	a, repo := cvToolsAPIWithBank(t, oneExperienceCV, bank)
+
+	tool := toolByName(t, a.assistantCVTools(testCVID, 9, uuid.New()), "cv_edit")
+	_, err := tool.Run(context.Background(), 3, json.RawMessage(
+		`{"ops":[{"kind":"set","path":"summary","value":"Senior backend engineer","evidence_id":"`+atom.ID.String()+`"}],`+
+			`"requirement":"PostgreSQL experience","requirement_status":"closed_bank"}`))
+	if err != nil {
+		t.Fatalf("cv_edit: %v", err)
+	}
+
+	var report []cv.AutopilotEntry
+	if err := json.Unmarshal(repo.report, &report); err != nil {
+		t.Fatalf("report unreadable: %v (raw %s)", err, repo.report)
+	}
+	if len(report) != 1 || report[0].Requirement != "PostgreSQL experience" || report[0].Status != cv.AutopilotClosedBank {
+		t.Errorf("report = %+v, want one entry closing \"PostgreSQL experience\"", report)
+	}
+}
+
+// A batch that names no requirement is the common case (rewording, reordering, adding a
+// technology tag) and must leave the report exactly as it was — merging a blank requirement
+// would either error or, worse, silently create a nameless row the panel cannot render.
+func TestCVEditToolWithNoRequirementLeavesTheReportUntouched(t *testing.T) {
+	bank := newStubBank()
+	atom := bank.add(3, experience.Atom{Claim: "Senior backend engineer", Provenance: experience.ProvenanceStatedInChat})
+	a, repo := cvToolsAPIWithBank(t, oneExperienceCV, bank)
+
+	tool := toolByName(t, a.assistantCVTools(testCVID, 9, uuid.New()), "cv_edit")
+	_, err := tool.Run(context.Background(), 3, json.RawMessage(
+		`{"ops":[{"kind":"set","path":"summary","value":"Senior backend engineer","evidence_id":"`+atom.ID.String()+`"}]}`))
+	if err != nil {
+		t.Fatalf("cv_edit: %v", err)
+	}
+	if repo.report != nil {
+		t.Errorf("report = %s, want it untouched when the call named no requirement", repo.report)
+	}
+}
+
+// requirement_status only makes sense as an outcome the edit just produced — open and
+// not_reached describe requirements NOT closed, so cv_edit (which only ever closes one) must
+// not advertise or accept them; a model that could send "open" here could silently reopen a
+// requirement tailor_report already closed, through a call that carries no report review.
+func TestCVEditToolRequirementStatusOffersOnlyClosingOutcomes(t *testing.T) {
+	a, _ := cvToolsAPI(t, oneExperienceCV)
+	tool := toolByName(t, a.assistantCVTools(testCVID, 9, uuid.New()), "cv_edit")
+	props, _ := tool.Schema["properties"].(map[string]any)
+	status, _ := props["requirement_status"].(map[string]any)
+	got, _ := status["enum"].([]string)
+
+	want := []string{string(cv.AutopilotClosedBank), string(cv.AutopilotClosedCandidate)}
+	if len(got) != len(want) {
+		t.Fatalf("requirement_status enum = %v, want %v", got, want)
+	}
+	for _, w := range want {
+		found := false
+		for _, g := range got {
+			if g == w {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("requirement_status enum = %v, missing %q", got, w)
+		}
+	}
+}
+
+func TestCVEditToolRequirementWithoutStatusIsRefused(t *testing.T) {
+	bank := newStubBank()
+	atom := bank.add(3, experience.Atom{Claim: "Senior backend engineer", Provenance: experience.ProvenanceStatedInChat})
+	a, repo := cvToolsAPIWithBank(t, oneExperienceCV, bank)
+
+	tool := toolByName(t, a.assistantCVTools(testCVID, 9, uuid.New()), "cv_edit")
+	_, err := tool.Run(context.Background(), 3, json.RawMessage(
+		`{"ops":[{"kind":"set","path":"summary","value":"Senior backend engineer","evidence_id":"`+atom.ID.String()+`"}],`+
+			`"requirement":"PostgreSQL experience"}`))
+	if err == nil {
+		t.Fatal("a requirement with no status was accepted; the report would hold an invalid entry")
+	}
+	if repo.report != nil {
+		t.Errorf("report = %s, want it untouched when the call is refused", repo.report)
+	}
+}
+
 // A batch is one entry in the candidate's history and one round of the turn's budget, which
 // is why closing a requirement no longer costs three calls.
 func TestCVEditAppliesAWholeBatchAtOnce(t *testing.T) {
