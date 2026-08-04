@@ -57,11 +57,16 @@
   let busy = $state(false);
   // Which form section is shown — the profile is long, so split it into two tabs sharing
   // one Save (both tabs feed the same PUT). The list drives TabRow, and typing it `as const`
-  // ties `formTab` to it: an id that is not a section stops being expressible.
-  const formTabs = [
-    { id: 'main', label: 'Skills & role' },
-    { id: 'location', label: 'Location & work' },
-  ] as const;
+  // ties `formTab` to it: an id that is not a section stops being expressible. The first
+  // tab's label drops "Skills" once a profile exists — Skills and Skills to avoid live on
+  // their own top-level tab then (see /my/profile's Skills tab); they stay here only for
+  // first-time set-up, before that tab is reachable.
+  const formTabs = $derived(
+    [
+      { id: 'main', label: editing ? 'Role' : 'Skills & role' },
+      { id: 'location', label: 'Location & work' },
+    ] as const,
+  );
   const formPanelId = 'profile-form-panel';
   let formTab = $state<'main' | 'location'>('main');
 
@@ -138,9 +143,13 @@
     void loadSkillDistribution().then((dist) => (skillDist = dist));
   });
 
-  // Derive skills + specialization from a résumé PDF and merge them into the fields as a
-  // deduplicated union, preserving anything already entered (the specialization respects
-  // the cap). The upload also stores the CV server-side, so notify the parent to refresh
+  // Derive skills + specialization from a résumé PDF. Specializations always merge into the
+  // local field, respecting the cap, saved together with Role on the next Save click. Skills
+  // differ by mode: before a profile exists, they merge into the local field the same way
+  // (Save persists both together, since a profile needs both up front); once a profile
+  // exists, Skills has moved to its own autosaving tab, so extracted skills are written
+  // straight to the profile in one bulk PUT instead of buffering into a field that no longer
+  // renders here. The upload also stores the CV server-side, so notify the parent to refresh
   // the CV-readiness state.
   async function analyzeResume(file: File) {
     resumeBusy = true;
@@ -151,9 +160,16 @@
       track('cv_upload', { ok: true, origin: 'profile' });
       onCvUploaded?.();
 
-      const beforeSkills = skills.length;
-      skills = [...new Set([...skills, ...cv.skills])];
-      const addedSkills = skills.length - beforeSkills;
+      let addedSkills: number;
+      if (editing) {
+        const before = new Set(skills);
+        addedSkills = cv.skills.filter((s) => !before.has(s)).length;
+        if (addedSkills > 0) await profileStore.addSkills(cv.skills);
+      } else {
+        const beforeSkills = skills.length;
+        skills = [...new Set([...skills, ...cv.skills])];
+        addedSkills = skills.length - beforeSkills;
+      }
 
       // Merge every specialization the CV resolved, respecting the cap; track how many
       // were added vs. left out by the cap so the note is accurate.
@@ -172,8 +188,11 @@
       const parts: string[] = [];
       if (addedSkills > 0) parts.push(`${addedSkills} skill${addedSkills === 1 ? '' : 's'}`);
       if (addedSpecs > 0) parts.push(`${addedSpecs} specialization${addedSpecs === 1 ? '' : 's'}`);
-      if (parts.length) resumeNote = `Added ${parts.join(' and ')} from your CV.`;
-      else if (cappedSpecs > 0)
+      if (parts.length) {
+        resumeNote = editing
+          ? `Added ${parts.join(' and ')} from your CV — see the Skills tab.`
+          : `Added ${parts.join(' and ')} from your CV.`;
+      } else if (cappedSpecs > 0)
         resumeNote = `Reached the ${MAX_SPECIALIZATIONS}-specialization limit — nothing more added.`;
       else if (cv.skills.length === 0 && cv.categories.length === 0) resumeNote = 'No known skills found in the CV.';
       else resumeNote = 'Everything from your CV was already listed.';
@@ -400,7 +419,9 @@
       {/if}
     </button>
     <span class="text-xs text-muted-foreground">
-      PDF with selectable text, up to {RESUME_MAX_MB} MB · extracts your skills below; the file is stored to score its readiness.
+      PDF with selectable text, up to {RESUME_MAX_MB} MB ·
+      {editing ? 'adds new skills to your profile' : 'extracts your skills below'}; the file is
+      stored to score its readiness.
     </span>
     {#if resumeError}
       <p class="text-sm text-destructive">{resumeError}</p>
@@ -413,7 +434,11 @@
        Renders nothing when object storage is unconfigured. -->
   <HeadshotField />
 
-  <!-- Skills -->
+  {#if !editing}
+  <!-- Skills — set-up only. Once a profile exists, Skills and Skills to avoid move to
+       their own top-level tab (autosaving, no Save button); the server also requires at
+       least one skill to create a profile in the first place, so they stay here until
+       there is a profile — and a Skills tab — to move to. -->
   <div class="flex flex-col gap-2">
     <div class="flex items-baseline justify-between">
       <span class="text-sm font-medium">Skills</span>
@@ -451,6 +476,7 @@
       Filtered out when you apply your profile to the job filters.
     </span>
   </div>
+  {/if}
 
   <!-- Role / specializations -->
   <div class="flex flex-col gap-2">
@@ -597,7 +623,9 @@
     </Button>
     {#if !canSubmit}
       <span class="text-xs text-muted-foreground">
-        Add a role and at least one skill in the “Skills &amp; role” tab to save.
+        {editing
+          ? 'Add a role in the Role tab to save.'
+          : 'Add a role and at least one skill in the “Skills & role” tab to save.'}
       </span>
     {/if}
   </div>
