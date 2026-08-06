@@ -91,6 +91,27 @@ func TestSearchCitiesCapsResults(t *testing.T) {
 	}
 }
 
+// TestSearchCitiesOverrideDoesNotHijackAnUnrelatedPlace reproduces a real collision: a
+// GeoNames row can legitimately list an incidental alternate name that happens to equal
+// another place's override key (e.g. Frankfort, Kentucky lists "Frankfurt" as an
+// alternate name, colliding with the "frankfurt" -> Frankfurt-am-Main override). That
+// coincidence must not rename or dedupe-away the unrelated row.
+func TestSearchCitiesOverrideDoesNotHijackAnUnrelatedPlace(t *testing.T) {
+	tsv := "Big City\tde\tbig city|shared\n" + // the genuine override target
+		"Small Town\tus\tsmall town|shared\n" // coincidentally shares the "shared" alias
+	overrides := map[string]cityEntry{
+		"shared": {Name: "Big City Renamed", Country: "de"},
+	}
+	index := loadCitySearchIndex(tsv, overrides)
+
+	got := searchCitiesIn(index, "Small Town", "", 20)
+
+	want := []CityMatch{{Name: "Small Town", Country: "us"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("searchCitiesIn(%q) = %+v, want %+v (unrelated place must survive, unrenamed)", "Small Town", got, want)
+	}
+}
+
 func TestSearchCitiesAppliesOverrideDisplayName(t *testing.T) {
 	tsv := "Köln\tde\tköln|cologne\n"
 	overrides := map[string]cityEntry{
@@ -138,5 +159,14 @@ func TestEmbeddedCitySearchIndex(t *testing.T) {
 
 	if got := SearchCities("colog", "", citySearchMaxResults); len(got) == 0 || got[0].Name != "Cologne" {
 		t.Errorf("SearchCities(%q) = %+v, want Cologne first (curated override)", "colog", got)
+	}
+
+	// Regression: an unrelated US place that happens to share an alternate name with an
+	// override target must still be searchable by its own name, not hijacked or dropped.
+	if got := SearchCities("Frankfort", "us", citySearchMaxResults); len(got) == 0 {
+		t.Error(`SearchCities("Frankfort", country=us) = [], want the real Frankfort, US`)
+	}
+	if got := SearchCities("Campoalegre", "", citySearchMaxResults); len(got) == 0 {
+		t.Error(`SearchCities("Campoalegre") = [], want the real Campoalegre, CO`)
 	}
 }

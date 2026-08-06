@@ -30,12 +30,22 @@ type citySearchEntry struct {
 var citySearchIndex = loadCitySearchIndex(citiesTSV, cityOverrides)
 
 // loadCitySearchIndex walks the TSV in file order (population-sorted, same as
-// loadCityDict), applying any override that matches one of a row's own aliases (a row is
-// resolved independently of every other row, so two places that happen to share a plain
-// canonical name — e.g. two "Springfield"s in different countries — each keep their own
-// entry rather than colliding, unlike an alias-keyed lookup). Rows that resolve to the
-// same final (Name, Country) collapse to the first (most populous) occurrence, keeping
-// that occurrence's own alias list for the alias-prefix fallback.
+// loadCityDict), resolving each row independently of every other row so two places that
+// happen to share a plain canonical name — e.g. two "Springfield"s in different countries
+// — each keep their own entry rather than colliding, unlike an alias-keyed lookup.
+//
+// An override renames a row only when the override's country matches the row's own raw
+// country. A GeoNames alternate-name list can legitimately list an incidental name shared
+// with an unrelated place in another country (Frankfort, Kentucky lists "Frankfurt" as an
+// alternate name, the same string the "frankfurt" -> Frankfurt-am-Main override keys on);
+// without the country guard, that coincidence would rename Frankfort to "Frankfurt" and
+// then dedupe it away entirely as a false duplicate of the German city. Every current
+// override's target country matches the place it curates, so the guard costs nothing for
+// the cases it is meant to fire on.
+//
+// Rows that resolve to the same final (Name, Country) collapse to the first (most
+// populous) occurrence, keeping that occurrence's own alias list for the alias-prefix
+// fallback.
 func loadCitySearchIndex(tsv string, overrides map[string]cityEntry) []citySearchEntry {
 	seen := map[cityEntry]bool{}
 	var out []citySearchEntry
@@ -53,7 +63,7 @@ func loadCitySearchIndex(tsv string, overrides map[string]cityEntry) []citySearc
 		aliases := strings.Split(parts[2], "|")
 		final := cityEntry{Name: parts[0], Country: parts[1]}
 		for _, alias := range aliases {
-			if ov, ok := overrides[alias]; ok {
+			if ov, ok := overrides[alias]; ok && ov.Country == final.Country {
 				final = ov
 				break
 			}
