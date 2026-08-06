@@ -41,9 +41,27 @@ GET-only handler under its own `internal/handler/<name>.go` file, registered dir
 **A dedicated ordered slice, built once at init, alongside `cityDict`.** `cityDict` is a Go
 map (unordered) keyed by alias, with many aliases collapsing onto one `cityEntry` — iterating
 it at request time would require re-deduplicating and re-sorting by population on every
-call. Instead, `loadCityDict` gains a sibling build step that walks the same TSV once and
-produces `[]cityEntry` deduplicated by (Name, Country), in the file's existing
-population-sorted order. `SearchCities` scans this slice, not the map.
+call. Instead, a sibling build step (`loadCitySearchIndex`) walks the same TSV once, in file
+(population-sorted) order, producing one `citySearchEntry` **per row** (not per alias) —
+each row is one real GeoNames place, so this is the only unit that can never
+silently conflate two distinct places or lose one. `SearchCities` scans this slice, not the
+`cityDict` map.
+
+**An override renames a row only when its country matches AND no earlier row has already
+claimed it.** `cityOverrides` (the existing `internal/location` table used by `cityDict`) is
+alias-keyed, not row-keyed — nothing in it says *which* GeoNames row a given override was
+curated for, only which alias string should resolve to it. A row's own alternate-name list
+can legitimately, coincidentally contain that same alias string for an unrelated place: two
+rounds of review surfaced two real instances — Frankfort, US shares the literal alternate
+name "Frankfurt" with the `frankfurt` → Frankfurt-am-Main override (a different country, so
+a same-country guard alone stops it), and Frankfurt (Oder), DE shares that *same* alias in
+the *same* country as the true target, which a country guard cannot distinguish. The fix
+that closes both: apply an override to a row only if (a) the override's target country
+equals the row's own raw country, and (b) no earlier — i.e. more populous, since the file is
+population-sorted — row has already claimed that exact override target. The larger, earlier
+Frankfurt am Main claims the `frankfurt` override first; Frankfurt (Oder), reached later in
+the scan, finds it already claimed and keeps its own raw name instead of being renamed and
+then deduped away as a false duplicate.
 
 **Matching: case-insensitive prefix on the canonical name, falling back to alias prefix.**
 A user typing "Flor" should reach "Florianópolis" (canonical-name prefix); a user typing an
@@ -69,11 +87,16 @@ group** — mirrors `companiesHandlers`/`CompanySubindustries` exactly: a small 
 unauthenticated because this serves the same public geography reference data the job-search
 facets already expose, not anything user-scoped.
 
-**Response value: bare canonical city name; label: `"<name>, <country display name>"`.**
-The `value` is what gets saved into `location_preferences` — unchanged shape, so no frontend
-translation layer is needed between "what the picker returns" and "what the save payload
-expects". The `label` adds the country only for on-screen disambiguation (Decisions →
-Non-Goals: storage stays a bare name).
+**Response shape: `{"value": "<name>", "country": "<iso code>"}` — the human-readable label
+is composed client-side, not by the endpoint.** `value` is what gets saved into
+`location_preferences`, unchanged from today's free-text shape (Decisions → Non-Goals:
+storage stays a bare name). For the country name, `web/src/lib/facets.ts` already has
+`countryLabel(code)` — an `Intl.DisplayNames`-backed resolver with no hand-maintained
+table, used to build `COUNTRY_OPTIONS` for the very `<select>` next to this field. Having
+the endpoint ship a raw ISO code and letting `searchCities()` compose
+`` `${name}, ${countryLabel(country)}` `` reuses that resolver instead of standing up a
+second country-name table in Go — the backend only needs the code it already has in
+`cityEntry.Country`.
 
 **Frontend: reuse `RemoteSearchSelect` for both fields; no new component.** For
 `relocation.cities` (already a `string[]`) this is the component's native mode — `include =

@@ -51,21 +51,21 @@ matches first, regardless of how many dictionary entries match the query.
 ### Requirement: City search is served over a public, read-only endpoint
 
 The system SHALL expose city search at `GET /geo/cities` accepting `q` (the query) and
-an optional `country`, returning `200` with `{"data": [{"value", "label"}, ...]}` where
-`value` is the city's canonical name and `label` additionally names the country for
-on-screen disambiguation. The endpoint SHALL require no authentication, consistent with
-the other public geography/facet reference endpoints (e.g. company subindustries).
+an optional `country`, returning `200` with `{"data": [{"value", "country"}, ...]}` where
+`value` is the city's canonical name and `country` is its ISO 3166-1 alpha-2 code, for the
+caller to render (the endpoint does not compose a human-readable label itself). The
+endpoint SHALL require no authentication, consistent with the other public
+geography/facet reference endpoints (e.g. company subindustries).
 
 #### Scenario: An anonymous request is served
 
 - **WHEN** an unauthenticated client requests `GET /geo/cities?q=Berl`
 - **THEN** the system responds `200` with matching cities, not `401`
 
-#### Scenario: A result's label names the country
+#### Scenario: A result carries its country code for disambiguation
 
 - **WHEN** a search for `Springfield` returns entries from more than one country
-- **THEN** each result's `label` includes that entry's country, distinguishing the
-  otherwise-identical `value`s
+- **THEN** each result's `country` distinguishes the otherwise-identical `value`s
 
 ### Requirement: The profile's base-city control is a single-value city search picker
 

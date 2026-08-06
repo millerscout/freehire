@@ -112,6 +112,32 @@ func TestSearchCitiesOverrideDoesNotHijackAnUnrelatedPlace(t *testing.T) {
 	}
 }
 
+// TestSearchCitiesOverrideAppliesOnlyToTheMostPopulousMatch reproduces a same-country
+// collision the country guard alone cannot catch: Frankfurt (Oder), DE genuinely lists
+// "frankfurt" among its GeoNames alternate names too, the exact string the
+// frankfurt -> Frankfurt-am-Main override keys on, and both rows are in "de". Only the
+// first (most populous, i.e. first in population-sorted file order) row a given override
+// target claims should be renamed; a later row that merely shares the same coincidental
+// alias-and-country must keep its own raw identity.
+func TestSearchCitiesOverrideAppliesOnlyToTheMostPopulousMatch(t *testing.T) {
+	tsv := "Big Town\tde\tbig town|shared\n" + // most populous — the genuine override target
+		"Small Town\tde\tsmall town|shared\n" // same country, coincidentally shares "shared" too
+	overrides := map[string]cityEntry{
+		"shared": {Name: "Big Town Renamed", Country: "de"},
+	}
+	index := loadCitySearchIndex(tsv, overrides)
+
+	renamed := searchCitiesIn(index, "Big Town Renamed", "", 20)
+	if want := []CityMatch{{Name: "Big Town Renamed", Country: "de"}}; !reflect.DeepEqual(renamed, want) {
+		t.Errorf("searchCitiesIn(%q) = %+v, want %+v", "Big Town Renamed", renamed, want)
+	}
+
+	survivor := searchCitiesIn(index, "Small Town", "", 20)
+	if want := []CityMatch{{Name: "Small Town", Country: "de"}}; !reflect.DeepEqual(survivor, want) {
+		t.Errorf("searchCitiesIn(%q) = %+v, want %+v (same-country coincidence must not hijack a second, less populous place)", "Small Town", survivor, want)
+	}
+}
+
 func TestSearchCitiesAppliesOverrideDisplayName(t *testing.T) {
 	tsv := "Köln\tde\tköln|cologne\n"
 	overrides := map[string]cityEntry{
@@ -168,5 +194,18 @@ func TestEmbeddedCitySearchIndex(t *testing.T) {
 	}
 	if got := SearchCities("Campoalegre", "", citySearchMaxResults); len(got) == 0 {
 		t.Error(`SearchCities("Campoalegre") = [], want the real Campoalegre, CO`)
+	}
+
+	// Regression: Frankfurt (Oder), DE shares both the "frankfurt" alias AND the country
+	// (de) with the frankfurt -> Frankfurt-am-Main override, yet is a distinct real city
+	// that must survive under its own name.
+	foundOder := false
+	for _, m := range SearchCities("Frankfurt (Oder)", "de", citySearchMaxResults) {
+		if m.Name == "Frankfurt (Oder)" {
+			foundOder = true
+		}
+	}
+	if !foundOder {
+		t.Error(`SearchCities("Frankfurt (Oder)", country=de) missing Frankfurt (Oder) — hijacked by the Frankfurt am Main override`)
 	}
 }

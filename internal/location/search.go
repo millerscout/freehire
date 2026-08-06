@@ -34,20 +34,23 @@ var citySearchIndex = loadCitySearchIndex(citiesTSV, cityOverrides)
 // happen to share a plain canonical name — e.g. two "Springfield"s in different countries
 // — each keep their own entry rather than colliding, unlike an alias-keyed lookup.
 //
-// An override renames a row only when the override's country matches the row's own raw
-// country. A GeoNames alternate-name list can legitimately list an incidental name shared
-// with an unrelated place in another country (Frankfort, Kentucky lists "Frankfurt" as an
-// alternate name, the same string the "frankfurt" -> Frankfurt-am-Main override keys on);
-// without the country guard, that coincidence would rename Frankfort to "Frankfurt" and
-// then dedupe it away entirely as a false duplicate of the German city. Every current
-// override's target country matches the place it curates, so the guard costs nothing for
-// the cases it is meant to fire on.
+// An override renames a row only when (a) the override's country matches the row's own
+// raw country, and (b) no earlier (more populous) row has already claimed that same
+// override target. A GeoNames alternate-name list can legitimately list an incidental
+// name shared with an unrelated place — sometimes in the very country the override
+// targets: Frankfurt (Oder), DE and Frankfurt am Main, DE both list bare "frankfurt" as
+// an alternate name, so the country guard alone cannot tell them apart, but only the
+// larger, earlier-in-file Frankfurt am Main is the "frankfurt" -> Frankfurt override's
+// intended target. Without the claim guard, the smaller Frankfurt (Oder) would also be
+// renamed to "Frankfurt" and then dedupe away entirely as a false duplicate.
 //
-// Rows that resolve to the same final (Name, Country) collapse to the first (most
-// populous) occurrence, keeping that occurrence's own alias list for the alias-prefix
-// fallback.
+// Rows that resolve to the same final (Name, Country) — including a row an override
+// left untouched but that happens to equal another row's raw identity — collapse to the
+// first (most populous) occurrence, keeping that occurrence's own alias list for the
+// alias-prefix fallback.
 func loadCitySearchIndex(tsv string, overrides map[string]cityEntry) []citySearchEntry {
 	seen := map[cityEntry]bool{}
+	claimed := map[cityEntry]bool{} // override targets already assigned to a row
 	var out []citySearchEntry
 	sc := bufio.NewScanner(strings.NewReader(tsv))
 	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
@@ -63,8 +66,9 @@ func loadCitySearchIndex(tsv string, overrides map[string]cityEntry) []citySearc
 		aliases := strings.Split(parts[2], "|")
 		final := cityEntry{Name: parts[0], Country: parts[1]}
 		for _, alias := range aliases {
-			if ov, ok := overrides[alias]; ok && ov.Country == final.Country {
+			if ov, ok := overrides[alias]; ok && ov.Country == final.Country && !claimed[ov] {
 				final = ov
+				claimed[ov] = true
 				break
 			}
 		}
