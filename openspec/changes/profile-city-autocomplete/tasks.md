@@ -14,18 +14,25 @@
 
 ## 2. Backend: HTTP endpoint
 
-- [ ] 2.1 Add `internal/handler/geo.go`: `geoHandlers` struct + `newGeoHandlers`, following
+- [x] 2.1 Add `internal/handler/geo.go`: `geoHandlers` struct + `newGeoHandlers`, following
       the `companiesHandlers`/`CompanySubindustries` pattern (no auth). `SearchCities`
       handler reads `q` and optional `country` query params, calls `location.SearchCities`
       with a limit of 20, responds `{"data": [{"value", "country"}]}` — a raw ISO code, not
       a pre-composed label (the frontend's existing `countryLabel()` composes the display
       string; see design.md's response-shape decision).
-- [ ] 2.2 Register `GET /geo/cities` on the `api` group in `internal/handler/handler.go`
+- [x] 2.2 Register `GET /geo/cities` on the `api` group in `internal/handler/handler.go`
       (mirrors the `companiesH` wiring).
-- [ ] 2.3 Integration test (`//go:build integration`, per `internal/handler`'s existing
-      convention) covering: anonymous request succeeds, `country` narrows results, response
-      shape.
-- [ ] 2.4 Document `GET /geo/cities` in `web/static/openapi.yaml`.
+- [x] 2.3 Integration test (`//go:build integration`, per `internal/handler`'s existing
+      convention) covering: reachable + unauthenticated through the real `Register()` wiring,
+      and `country` narrows results — confirmed RED (404) with the route registration
+      temporarily disabled, then GREEN restored.
+- [x] ~~2.4 Document `GET /geo/cities` in `web/static/openapi.yaml`.~~ Dropped: that file is
+      not a general API reference — its own `info.description` states it is "the freehire
+      ChatGPT Actions API" and "intentionally excludes" everything outside public job/company
+      search for agent consumption. `/geo/cities` is an internal helper for the SPA's own
+      profile form, not an agent-facing capability; adding it there would be scope creep
+      against the file's stated purpose, not a genuine gap. (Planning-time assumption that
+      didn't hold up once the file's actual scope was checked.)
 
 ## 3. Frontend: search helper
 

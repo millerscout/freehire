@@ -46,8 +46,9 @@ accepted or stored.
 ## Impact
 
 - New code: `internal/location` (search function + tests), a new handler + route
-  (`internal/handler`), `web/src/lib/facets.ts` (search helper), `web/static/openapi.yaml`
-  (new endpoint documented).
+  (`internal/handler`), `web/src/lib/facets.ts` (search helper). Not documented in
+  `web/static/openapi.yaml` — that file is the curated public ChatGPT Actions schema, not a
+  general API reference, and this is an internal helper for the SPA's own profile form.
 - Changed code: `web/src/lib/components/ProfileForm.svelte` (two fields rewired; the
   now-unused `cityDraft`/`addCity` free-text-chip code is removed).
 - No new external dependency, no new database table or column, no migration.
