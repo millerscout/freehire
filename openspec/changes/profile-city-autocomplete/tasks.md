@@ -36,24 +36,42 @@
 
 ## 3. Frontend: search helper
 
-- [ ] 3.1 Add `searchCities(query: string, country?: string): Promise<FacetOption[]>` to
-      `web/src/lib/facets.ts`, calling `GET /geo/cities`.
+- [x] 3.1 Add `searchCities(query: string, country?: string): Promise<FacetOption[]>` to
+      `web/src/lib/facets.ts`, calling `GET /geo/cities`. Composes the label via the
+      existing `countryLabel()` (Intl.DisplayNames), matching the endpoint's raw-code
+      response. Unit-tested (`cityOption` in facets.test.ts).
 
 ## 4. Frontend: wire ProfileForm's city fields
 
-- [ ] 4.1 Replace `baseCity`'s plain `<Input>` with `RemoteSearchSelect`, single-value
+- [x] 4.1 Replace `baseCity`'s plain `<Input>` with `RemoteSearchSelect`, single-value
       semantics (`include = baseCity ? [baseCity] : []`, `onToggle` replaces/clears),
       search narrowed by `baseCountry`, `fallbackLabel={(v) => v}`.
-- [ ] 4.2 Replace the `relocCities` chip-list + Enter-to-add `<Input>` with
+- [x] 4.2 Replace the `relocCities` chip-list + Enter-to-add `<Input>` with
       `RemoteSearchSelect` in its native multi-select mode (`include = relocCities`,
       `onToggle` = existing `toggleIn`, `clearOnSelect`), search not narrowed by country.
-      Remove the now-dead `cityDraft` state and `addCity()` function.
-- [ ] 4.3 Manual verification in the browser: type-to-search on both fields in light and
-      dark mode; confirm a pre-existing free-text saved city (not in the dictionary) still
-      displays via `fallbackLabel` and survives an unrelated save.
+      Removed the dead `cityDraft` state and `addCity()` function. Also moved the shared
+      `RemoteSearchSelect` component's selected-chip row to render below the search input
+      instead of above it (user-requested layout fix, affects every usage of the
+      component: skills, base city, relocation cities, company/subindustry facets).
+- [x] 4.3 Manual verification in the browser: confirmed end-to-end — real GeoNames
+      results render with correct labels ("Florianópolis, Brazil"), picking replaces the
+      single base-city value and adds a removable chip for relocation cities, dark theme
+      renders correctly (readable text, matches the earlier `color-scheme` fix).
+      **Known open issue, not resolved:** the debounced search occasionally gets stuck
+      showing "Searching…" indefinitely even though the underlying fetch completes with
+      correct data — confirmed via direct DOM inspection (not just screenshots), in both
+      the Vite dev server and a production nginx build, with realistic (non-instant,
+      per-keystroke) typing in a headed browser, so it is not purely a headless-automation
+      artifact. Root cause not identified after extensive isolation testing (ruled out:
+      closure/prop reference stability, sibling elements, CSS layout, DOM position,
+      single- vs multi-instance, `tick()`). The identical `RemoteSearchSelect` +
+      `searchCities` combination *does* render correctly most of the time, including in
+      the successful runs recorded above — the failure is intermittent, not universal.
+      Flagged for follow-up; shipping as-is per explicit user direction.
 
 ## 5. Verification
 
-- [ ] 5.1 `go build ./... && go vet ./...` and `go vet -tags=integration ./...`.
-- [ ] 5.2 `go test ./... ` and `go test -tags=integration ./internal/handler/` (or the
-      project's integration-test invocation) green.
+- [x] 5.1 `go build ./... && go vet ./...` and `go vet -tags=integration ./...` — clean.
+- [x] 5.2 `go test ./...` and `go test -tags=integration ./internal/handler/` — green.
+      Frontend: `pnpm check` (0 errors), `pnpm test` (833/833), `pnpm lint` (0 errors,
+      baseline-only warnings) all green.
