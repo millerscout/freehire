@@ -6,8 +6,8 @@ import (
 	"github.com/strelov1/freehire/internal/location"
 )
 
-// citySearchLimit bounds a single /geo/cities response, matching the cap
-// location.SearchCities itself already applies internally.
+// citySearchLimit bounds a single /geo/cities response, matching the cap the other
+// remote-search facets (company, subindustry) already apply to their result lists.
 const citySearchLimit = 20
 
 // geoHandlers serves public geography reference reads — currently just city search,
