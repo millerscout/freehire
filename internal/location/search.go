@@ -48,6 +48,14 @@ var citySearchIndex = loadCitySearchIndex(citiesTSV, cityOverrides)
 // left untouched but that happens to equal another row's raw identity — collapse to the
 // first (most populous) occurrence, keeping that occurrence's own alias list for the
 // alias-prefix fallback.
+//
+// Caveat for whoever adds the next override: this assumes the curated target is always
+// the most populous same-country row carrying the override's alias — true for every
+// entry in cityOverrides today (checked against the full dataset), but unverified by any
+// test. If that ever stops holding, the bigger, unrelated place would silently claim the
+// override's display name instead of the intended city — a mislabeling, not a
+// disappearance, but still worth a spot-check (like the Frankfurt (Oder) one below) when
+// curating a new alias that could plausibly collide.
 func loadCitySearchIndex(tsv string, overrides map[string]cityEntry) []citySearchEntry {
 	seen := map[cityEntry]bool{}
 	claimed := map[cityEntry]bool{} // override targets already assigned to a row
