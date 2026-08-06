@@ -25,7 +25,7 @@
 - [x] 2.3 Integration test (`//go:build integration`, per `internal/handler`'s existing
       convention) covering: reachable + unauthenticated through the real `Register()` wiring,
       and `country` narrows results — confirmed RED (404) with the route registration
-      temporarily disabled, then GREEN restored.
+      temporarily disabled, then GREEN restored. Code-reviewed clean (no findings).
 - [x] ~~2.4 Document `GET /geo/cities` in `web/static/openapi.yaml`.~~ Dropped: that file is
       not a general API reference — its own `info.description` states it is "the freehire
       ChatGPT Actions API" and "intentionally excludes" everything outside public job/company
