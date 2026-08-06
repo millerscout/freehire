@@ -1,23 +1,25 @@
 ## 1. Backend: city search over the dictionary
 
-- [ ] 1.1 In `internal/location`, add a population-ordered, (Name, Country)-deduplicated
+- [x] 1.1 In `internal/location`, add a population-ordered, (Name, Country)-deduplicated
       `[]cityEntry` built once at init alongside `cityDict` (extend `loadCityDict` or add a
       sibling loader over the same TSV — do not re-parse independently).
-- [ ] 1.2 Add `SearchCities(query, countryCode string, limit int) []CityMatch` in
+- [x] 1.2 Add `SearchCities(query, countryCode string, limit int) []CityMatch` in
       `internal/location`: case-insensitive prefix match on canonical name, falling back to
       alias prefix; optional country filter; population-ranked (source order); blank query
       returns nothing.
-- [ ] 1.3 Unit tests for `SearchCities`: name-prefix match, alias-prefix match, dedup of an
+- [x] 1.3 Unit tests for `SearchCities`: name-prefix match, alias-prefix match, dedup of an
       entry matched by multiple aliases, country filter, cap enforcement on a broad query,
-      blank-query returns empty.
+      blank-query returns empty. (Two rounds of review also surfaced and fixed a
+      same-alias-different-place override collision — see search.go's `claimed` guard.)
 
 ## 2. Backend: HTTP endpoint
 
 - [ ] 2.1 Add `internal/handler/geo.go`: `geoHandlers` struct + `newGeoHandlers`, following
       the `companiesHandlers`/`CompanySubindustries` pattern (no auth). `SearchCities`
       handler reads `q` and optional `country` query params, calls `location.SearchCities`
-      with a limit of 20, responds `{"data": [{"value", "label"}]}` (`label` = `"<name>,
-      <country>"`).
+      with a limit of 20, responds `{"data": [{"value", "country"}]}` — a raw ISO code, not
+      a pre-composed label (the frontend's existing `countryLabel()` composes the display
+      string; see design.md's response-shape decision).
 - [ ] 2.2 Register `GET /geo/cities` on the `api` group in `internal/handler/handler.go`
       (mirrors the `companiesH` wiring).
 - [ ] 2.3 Integration test (`//go:build integration`, per `internal/handler`'s existing
