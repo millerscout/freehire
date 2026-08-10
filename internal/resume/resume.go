@@ -78,6 +78,10 @@ type Repository interface {
 	// GetGeography reads the derived candidate geography plus the two stamps needed to
 	// judge whether it still describes the stored CV.
 	GetGeography(ctx context.Context, userID int64) (db.GetUserResumeGeographyRow, error)
+	GetCandidateContacts(ctx context.Context, userID int64) ([]byte, error)
+	SetCandidateContacts(ctx context.Context, userID int64, blob []byte) error
+	SetExtractFailed(ctx context.Context, userID int64, detail string, uploadedAt time.Time) error
+	SetExtractPending(ctx context.Context, userID int64, uploadedAt time.Time) error
 }
 
 // Geography is where the candidate is, as derived from their CV and stored. Countries is
@@ -179,7 +183,7 @@ func (s *Store) SetStructured(ctx context.Context, userID int64, st resumeextrac
 		return fmt.Errorf("resume: marshal structured: %w", err)
 	}
 	countries, regions, cities := DeriveGeography(st.Location)
-	return s.repo.SetStructured(ctx, StructuredWrite{
+	if err := s.repo.SetStructured(ctx, StructuredWrite{
 		UserID:     userID,
 		Blob:       blob,
 		Model:      model,
@@ -187,7 +191,14 @@ func (s *Store) SetStructured(ctx context.Context, userID int64, st resumeextrac
 		Countries:  countries,
 		Regions:    regions,
 		Cities:     cities,
-	})
+	}); err != nil {
+		return err
+	}
+	// Fill-empty into owned contacts; never overwrite hand edits.
+	if err := s.FillEmptyContactsFromStructured(ctx, userID, st); err != nil {
+		return fmt.Errorf("resume: fill contacts: %w", err)
+	}
+	return nil
 }
 
 // DeriveGeography derives the candidate's geography from the location line their
@@ -252,6 +263,90 @@ func (s *Store) Structured(ctx context.Context, userID int64) (resumeextract.Str
 	return st, true, nil
 }
 
+// ProfileRead is the cookie résumé status composition: a current structure when the
+// stamp matches, otherwise provisional contacts from a superseded blob plus Pending.
+// Seed gates keep using Structured (ok=false when stale) and layer ProvisionalContacts
+// for identity while pending. See AGENTS.md for the identity table.
+type ProfileRead struct {
+	Structure resumeextract.Structured
+	Current   bool // stamp matches — Structure is the full current extract
+	Pending   bool // a résumé is present but the structure stamp does not match it
+}
+
+// ProfileReadForUser returns what GET /me/resume needs for the profile Profile tab.
+// When the stamp is current, Structure is the full extract. When it is stale or the
+// extract never landed, Pending is true and Structure carries only contact fields from
+// any superseded blob (empty when none) — semantic sections stay empty until a current
+// stamp lands.
+func (s *Store) ProfileReadForUser(ctx context.Context, userID int64) (ProfileRead, error) {
+	row, err := s.repo.GetStructured(ctx, userID)
+	if err != nil {
+		return ProfileRead{}, err
+	}
+	hasResume := row.ResumeUploadedAt.Valid
+	hasBlob := len(row.ResumeStructured) > 0
+	current := hasBlob && stampsEqual(row.ResumeStructuredUploadedAt, row.ResumeUploadedAt)
+	pending := hasResume && !current
+
+	if !hasBlob {
+		return ProfileRead{Pending: pending}, nil
+	}
+	var st resumeextract.Structured
+	if err := json.Unmarshal(row.ResumeStructured, &st); err != nil {
+		// Corrupt blob: treat like absent content, but still surface pending if a CV exists.
+		return ProfileRead{Pending: pending}, nil
+	}
+	if current {
+		return ProfileRead{Structure: st, Current: true}, nil
+	}
+	return ProfileRead{
+		Structure: provisionalContacts(st),
+		Pending:   pending,
+	}, nil
+}
+
+// ProvisionalContacts returns identity fields from a superseded structured blob when the
+// stamp is not current with the upload. ok is false when the stamp is current (callers
+// use Structured), when no blob exists, or when the blob carries no contact fields.
+// Semantic sections are never included — the same slice ProfileRead serves while pending.
+func (s *Store) ProvisionalContacts(ctx context.Context, userID int64) (resumeextract.Structured, bool, error) {
+	row, err := s.repo.GetStructured(ctx, userID)
+	if err != nil {
+		return resumeextract.Structured{}, false, err
+	}
+	if len(row.ResumeStructured) == 0 {
+		return resumeextract.Structured{}, false, nil
+	}
+	if stampsEqual(row.ResumeStructuredUploadedAt, row.ResumeUploadedAt) {
+		return resumeextract.Structured{}, false, nil
+	}
+	var st resumeextract.Structured
+	if err := json.Unmarshal(row.ResumeStructured, &st); err != nil {
+		return resumeextract.Structured{}, false, nil
+	}
+	contacts := provisionalContacts(st)
+	if !hasContactFields(contacts) {
+		return resumeextract.Structured{}, false, nil
+	}
+	return contacts, true, nil
+}
+
+// provisionalContacts keeps identity fields from a superseded extract for the pending
+// window. Education, summary, skills and the rest wait for a current stamp.
+func provisionalContacts(st resumeextract.Structured) resumeextract.Structured {
+	return resumeextract.Structured{
+		FullName: st.FullName,
+		Email:    st.Email,
+		Phone:    st.Phone,
+		Location: st.Location,
+		Links:    append([]string(nil), st.Links...),
+	}
+}
+
+func hasContactFields(st resumeextract.Structured) bool {
+	return st.FullName != "" || st.Email != "" || st.Phone != "" || st.Location != "" || len(st.Links) > 0
+}
+
 // stampsEqual reports whether two timestamps are both present and equal — the freshness
 // rule for the structured résumé (mirrors the matchanalysis cache stamp comparison).
 func stampsEqual(a, b pgtype.Timestamptz) bool {
@@ -300,14 +395,34 @@ func (s *Store) Text(ctx context.Context, userID int64) (string, error) {
 	}
 	rc, err := s.blobs.Get(ctx, ptr.ResumeObjectKey.String)
 	if err != nil {
+		if isMissingObject(err) {
+			return "", ErrNotStored
+		}
 		return "", err
 	}
 	defer rc.Close()
 	data, err := io.ReadAll(rc)
 	if err != nil {
+		// MinIO/S3 GetObject is lazy: a missing key often surfaces only on the first read.
+		if isMissingObject(err) {
+			return "", ErrNotStored
+		}
 		return "", fmt.Errorf("resume: read object: %w", err)
 	}
 	return extractText(data)
+}
+
+// isMissingObject reports whether err means the résumé bytes are gone while the
+// pointer may still be present (recreated LocalStack/MinIO volume, bucket wipe, …).
+func isMissingObject(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "nosuchkey") ||
+		strings.Contains(msg, "no such key") ||
+		strings.Contains(msg, "the specified key does not exist") ||
+		strings.Contains(msg, "not found")
 }
 
 // Delete removes the stored object and clears the pointer.
@@ -502,4 +617,30 @@ func (s *Store) Geography(ctx context.Context, userID int64) (Geography, bool, e
 
 func (r *QueriesRepository) GetGeography(ctx context.Context, userID int64) (db.GetUserResumeGeographyRow, error) {
 	return r.q.GetUserResumeGeography(ctx, userID)
+}
+
+func (r *QueriesRepository) GetCandidateContacts(ctx context.Context, userID int64) ([]byte, error) {
+	return r.q.GetUserCandidateContacts(ctx, userID)
+}
+
+func (r *QueriesRepository) SetCandidateContacts(ctx context.Context, userID int64, blob []byte) error {
+	return r.q.SetUserCandidateContacts(ctx, db.SetUserCandidateContactsParams{
+		ID:                userID,
+		CandidateContacts: blob,
+	})
+}
+
+func (r *QueriesRepository) SetExtractFailed(ctx context.Context, userID int64, detail string, uploadedAt time.Time) error {
+	return r.q.SetUserResumeExtractFailed(ctx, db.SetUserResumeExtractFailedParams{
+		ID:                  userID,
+		ResumeExtractDetail: pgtype.Text{String: detail, Valid: detail != ""},
+		ResumeExtractFor:    pgtype.Timestamptz{Time: uploadedAt, Valid: true},
+	})
+}
+
+func (r *QueriesRepository) SetExtractPending(ctx context.Context, userID int64, uploadedAt time.Time) error {
+	return r.q.SetUserResumeExtractPending(ctx, db.SetUserResumeExtractPendingParams{
+		ID:               userID,
+		ResumeExtractFor: pgtype.Timestamptz{Time: uploadedAt, Valid: true},
+	})
 }

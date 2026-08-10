@@ -103,6 +103,13 @@ services:
       LLM_BASE_URL: "${LLM_BASE_URL:-}"
       LLM_API_KEY: "${LLM_API_KEY:-}"
       LLM_MODEL: "${LLM_MODEL:-}"
+      # Optional: the assistant's own model, chosen for tool calling rather than
+      # cheap one-shot extraction. Falls back to LLM_MODEL.
+      ASSISTANT_MODEL: "${ASSISTANT_MODEL:-}"
+      # Bullets allowed per experience or project. Unset (or below 1) means 20.
+      # The agent reads the live value into its cv_edit tool description, so
+      # raising this needs no prompt change.
+      CV_MAX_BULLETS: "${CV_MAX_BULLETS:-}"
       LANGFUSE_BASE_URL: "${LANGFUSE_BASE_URL:-}"
       LANGFUSE_PUBLIC_KEY: "${LANGFUSE_PUBLIC_KEY:-}"
       LANGFUSE_SECRET_KEY: "${LANGFUSE_SECRET_KEY:-}"

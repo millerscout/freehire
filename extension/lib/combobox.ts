@@ -140,8 +140,10 @@ export function runStep(doc: Document, step: ComboboxStep): Promise<ComboboxRepl
 function findWidget(doc: Document, label: string): { widget: Element | null; status: 'not_found' | 'ambiguous' } {
   const widgets = collectQuestions(doc)
     .filter((q) => normalizeLabel(q.label) === normalizeLabel(label))
-    .map((q) => q.controls[0])
-    .filter(isComboWidget);
+    .flatMap((q) => {
+      const el = q.controls[0];
+      return el && isComboWidget(el) ? [el] : [];
+    });
 
   // Guarded by the length check above: index 0 exists.
   if (widgets.length === 1) return { widget: widgets[0]!, status: 'not_found' };

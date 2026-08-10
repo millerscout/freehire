@@ -846,14 +846,27 @@ export type {
   Education as ResumeEducation,
 } from './generated/contracts';
 
-/** The résumé status (`GET /me/resume`): whether storage is enabled and a résumé is
- *  stored (with its upload time), plus the read-only structured résumé — null when the
- *  caller has none current (no résumé, unconfigured LLM, not yet extracted, or stale). */
+/** The résumé status (`GET /me/resume`): storage flags, owned contacts, parse status,
+ *  and the structured résumé (current semantic sections when stamped). */
+export interface CandidateContacts {
+  full_name?: string;
+  email?: string;
+  phone?: string;
+  location?: string;
+  links?: string[];
+}
+
 export interface ResumeMeta {
   enabled: boolean;
   present: boolean;
   uploaded_at: string | null;
   structured: import('./generated/contracts').Structured | null;
+  /** True when a résumé is stored but its structured parse stamp does not match yet. */
+  structure_pending?: boolean;
+  /** pending | ok | failed — omit when no résumé. */
+  parse_status?: string;
+  parse_detail?: string;
+  contacts?: CandidateContacts | null;
 }
 
 /** The caller's profile headshot: `enabled` is false when object storage is unconfigured
@@ -894,17 +907,23 @@ export interface CommunityReply {
 }
 
 /** One place where evidence was produced: a job or a project. Dates are free-form labels
- *  exactly as printed on a CV ("2021-03", "Mar 2021", "Present"). */
+ *  exactly as printed on a CV ("2021-03", "Mar 2021", "Present").
+ *  Jobs expose `company`; projects expose the place label as `name` (same storage column). */
 export type ExperienceEmployment = {
   id: string;
   kind: 'job' | 'project';
+  /** Employer name — present for `kind: 'job'`. */
   company?: string;
+  /** Project title — present for `kind: 'project'` (not a company). */
+  name?: string;
   role?: string;
   location?: string;
   start?: string;
   end?: string;
   current?: boolean;
   summary?: string;
+  /** Portfolio URL — typically set on projects. */
+  link?: string;
   stack?: string[];
 };
 
@@ -913,7 +932,10 @@ export type ExperienceEmployment = {
  *  kept so it can be asked about and barred from the page until confirmed. */
 export type ExperienceProvenance = 'cv_import' | 'stated_in_chat' | 'manual' | 'agent_inferred';
 
-/** One piece of evidence, at the grain of a CV bullet. */
+/** One piece of evidence, at the grain of a CV bullet.
+ *
+ *  `needs_context`, `needs_metrics`, and `cluster_id` arrive only on the list
+ *  projection — they are computed at read time and must not be POSTed back. */
 export type ExperienceAtom = {
   id: string;
   employment_id?: string;
@@ -923,6 +945,10 @@ export type ExperienceAtom = {
   skills?: string[];
   provenance: ExperienceProvenance;
   source_ref?: string;
+  needs_context?: boolean;
+  needs_metrics?: boolean;
+  /** Shared id of a soft-duplicate group (first member), when the list clustered this atom. */
+  cluster_id?: string;
 };
 
 export type ExperienceEmploymentWithAtoms = ExperienceEmployment & { atoms: ExperienceAtom[] };

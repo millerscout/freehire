@@ -284,7 +284,8 @@ type Querier interface {
 	// derived structured résumé (the structure must not outlive the CV it describes), and
 	// the geography derived from that structure (which must not outlive it either — a
 	// country left behind here would keep answering "where is this candidate" from a CV
-	// that no longer exists).
+	// that no longer exists). Candidate contacts are intentionally kept: they are
+	// owner-edited identity, not an extract artifact.
 	ClearUserResume(ctx context.Context, id int64) error
 	// Moderator close: the thread leaves the open listing and rejects new replies.
 	CloseCommunityThread(ctx context.Context, id int64) error
@@ -1169,6 +1170,10 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id int64) (GetUserByIDRow, error)
 	// OAuth sign-in fast path: resolve a provider identity straight to its user.
 	GetUserByIdentity(ctx context.Context, arg GetUserByIdentityParams) (GetUserByIdentityRow, error)
+	GetUserCandidateContacts(ctx context.Context, id int64) ([]byte, error)
+	// Whether interactive atom creates require a non-empty context. Kept off /auth/me on
+	// purpose — only the experience write path and get_profile's bank summary need it.
+	GetUserExperienceRequireContext(ctx context.Context, id int64) (bool, error)
 	// Reverse lookup: the user linked to an inbound Discord account, for contribution-from-Discord. If a
 	// Discord account somehow linked more than once, the most recently linked user wins.
 	GetUserIDByDiscordID(ctx context.Context, discordID int64) (int64, error)
@@ -1215,6 +1220,7 @@ type Querier interface {
 	// the résumé upload time it was derived from), alongside the current résumé upload time
 	// so the caller can tell whether the structure still describes the stored CV (served
 	// only when resume_structured_uploaded_at equals resume_uploaded_at). NULLs when none.
+	// Also returns candidate contacts and last extract status for Profile / seed composition.
 	GetUserResumeStructured(ctx context.Context, id int64) (GetUserResumeStructuredRow, error)
 	// Slim role lookup for the RequireRole authorization middleware: it runs on every
 	// request to a role-gated endpoint and needs only the role, so it does not drag the
@@ -2034,6 +2040,11 @@ type Querier interface {
 	// Cursor write: mark a rotated file applied. Idempotent — a concurrent/rerun mark
 	// is a no-op, so the file is never double-applied.
 	MarkViewLogFileProcessed(ctx context.Context, arg MarkViewLogFileProcessedParams) error
+	// Atomically delete the loser and update the keep. The DELETE RETURNING CTE is the
+	// transaction: the UPDATE only lands when the delete did, so a missing/foreign loser
+	// yields no row (caller maps to not found) rather than a half-applied merge. Claim,
+	// claim_key, employment_id and source_ref stay on the keep — only richness fields move.
+	MergeExperienceAtoms(ctx context.Context, arg MergeExperienceAtomsParams) (ExperienceAtom, error)
 	// The revision a follow-on edit might be folded into. Only the newest is a candidate:
 	// coalescing into anything older would reorder the log.
 	NewestCVRevision(ctx context.Context, arg NewestCVRevisionParams) (CvRevision, error)
@@ -2701,9 +2712,12 @@ type Querier interface {
 	SetTalentNetworkVisibility(ctx context.Context, arg SetTalentNetworkVisibilityParams) error
 	// Cache the derived CV ATS review for the user (keyed to their stored CV).
 	SetUserATSAnalysis(ctx context.Context, arg SetUserATSAnalysisParams) error
+	SetUserCandidateContacts(ctx context.Context, arg SetUserCandidateContactsParams) error
 	// Record that control of the address was proven. Idempotent — confirming twice is a
 	// no-op rather than an error, so a double-submitted code does not fail the request.
 	SetUserEmailVerified(ctx context.Context, id int64) error
+	// Chat-opt-in (or opt-out) for requiring context on interactive experience creates.
+	SetUserExperienceRequireContext(ctx context.Context, arg SetUserExperienceRequireContextParams) error
 	// Change a known password. Revokes every other session in the same statement, so a
 	// stolen token cannot outlive the password it was minted under. Does NOT touch
 	// email_verified: knowing the current password proves nothing about the address.
@@ -2714,11 +2728,16 @@ type Querier interface {
 	SetUserPhoto(ctx context.Context, arg SetUserPhotoParams) error
 	// Record (or replace) the user's stored-résumé pointer, stamping the upload time.
 	// Owner-scoped by id; the object key is derived from the id, never client input.
-	// Also clears any cached ATS review so a new CV is never scored with a stale one.
+	// Also clears any cached ATS review so a new CV is never scored with a stale one,
+	// and marks structured extract pending for this upload (background work must catch up).
 	SetUserResume(ctx context.Context, arg SetUserResumeParams) error
 	// Persist the user's derived CV embedding vector plus the identity of the embedder
 	// that produced it (so a model change can mark the vector stale). Never the raw CV text.
 	SetUserResumeEmbedding(ctx context.Context, arg SetUserResumeEmbeddingParams) error
+	// Record that structured extract failed for the current upload. The for-stamp guard
+	// drops the write when a newer upload already superseded this attempt.
+	SetUserResumeExtractFailed(ctx context.Context, arg SetUserResumeExtractFailedParams) error
+	SetUserResumeExtractPending(ctx context.Context, arg SetUserResumeExtractPendingParams) error
 	// Persist only the derived geography for a user, under the same monotonic guard the
 	// structure write uses. This is the reconciler's write path: it re-derives from an
 	// already-stored structure, so it must not touch the structure or its model stamp, and
@@ -2737,6 +2756,7 @@ type Querier interface {
 	// structure it was derived from. It is deterministic and costs no I/O, so there is
 	// nothing to gain by deferring it — and a separate write would have to duplicate the
 	// guard, which is exactly how invariants drift apart.
+	// On success, extract status is marked ok for this upload stamp.
 	SetUserResumeStructured(ctx context.Context, arg SetUserResumeStructuredParams) error
 	// Soft-delete one message (hidden from the listing, retained for restore),
 	// scoped to the caller and idempotent. Returns 0 rows only when it is not the

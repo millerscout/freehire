@@ -54,6 +54,30 @@ func (s *Store) WorkHistory(ctx context.Context, userID int64) ([]resumeextract.
 	return experienceFromBank(employments, atoms), nil
 }
 
+// SeedHistory is the bank projection CV seed needs: jobs and projects kept apart, with
+// flags so the seeder knows whether to fall back to the structured résumé.
+type SeedHistory struct {
+	Experience            []resumeextract.Experience
+	Projects              []resumeextract.Project
+	HasEmployments        bool
+	HasProjectEmployments bool
+}
+
+// SeedHistory renders employments for CV seed: job-kind rows become work history, project-
+// kind rows become portfolio projects (name, link, publishable highlights). Fit analysis
+// keeps using WorkHistory, which still flattens every place into experience-shaped rows.
+func (s *Store) SeedHistory(ctx context.Context, userID int64) (SeedHistory, error) {
+	employments, err := s.ListEmployments(ctx, userID)
+	if err != nil {
+		return SeedHistory{}, err
+	}
+	atoms, err := s.ListAtoms(ctx, userID)
+	if err != nil {
+		return SeedHistory{}, err
+	}
+	return seedHistoryFromBank(employments, atoms), nil
+}
+
 // experienceFromBank renders the bank as work-history entries, in the order the store
 // returned the employments (current roles first, most recent within that).
 //
@@ -61,18 +85,7 @@ func (s *Store) WorkHistory(ctx context.Context, userID int64) ([]resumeextract.
 // candidate stands behind, and this projection feeds both the model that scores their fit
 // and the CV seeded from it.
 func experienceFromBank(employments []Employment, atoms []Atom) []resumeextract.Experience {
-	highlights := make(map[uuid.UUID][]string, len(employments))
-	var placeless []string
-	for _, atom := range atoms {
-		if !atom.Provenance.Publishable() {
-			continue
-		}
-		if atom.EmploymentID == nil {
-			placeless = append(placeless, atom.Claim)
-			continue
-		}
-		highlights[*atom.EmploymentID] = append(highlights[*atom.EmploymentID], atom.Claim)
-	}
+	highlights, placeless := publishableHighlights(atoms)
 
 	out := make([]resumeextract.Experience, 0, len(employments)+1)
 	for _, e := range employments {
@@ -103,4 +116,55 @@ func experienceFromBank(employments []Employment, atoms []Atom) []resumeextract.
 		out = append(out, resumeextract.Experience{Highlights: placeless})
 	}
 	return out
+}
+
+func seedHistoryFromBank(employments []Employment, atoms []Atom) SeedHistory {
+	highlights, placeless := publishableHighlights(atoms)
+	out := SeedHistory{HasEmployments: len(employments) > 0}
+	for _, e := range employments {
+		hs := highlights[e.ID]
+		if e.Kind == KindProject {
+			out.HasProjectEmployments = true
+			name := e.Company
+			if name == "" {
+				name = e.Role
+			}
+			out.Projects = append(out.Projects, resumeextract.Project{
+				Name:       name,
+				Link:       e.Link,
+				Highlights: hs,
+			})
+			continue
+		}
+		out.Experience = append(out.Experience, resumeextract.Experience{
+			Title:      e.Role,
+			Company:    e.Company,
+			Location:   e.Location,
+			Start:      e.Start,
+			End:        e.End,
+			Summary:    e.Summary,
+			Highlights: hs,
+			Stack:      e.Stack,
+		})
+	}
+	if len(placeless) > 0 {
+		out.Experience = append(out.Experience, resumeextract.Experience{Highlights: placeless})
+	}
+	return out
+}
+
+func publishableHighlights(atoms []Atom) (map[uuid.UUID][]string, []string) {
+	highlights := make(map[uuid.UUID][]string)
+	var placeless []string
+	for _, atom := range atoms {
+		if !atom.Provenance.Publishable() {
+			continue
+		}
+		if atom.EmploymentID == nil {
+			placeless = append(placeless, atom.Claim)
+			continue
+		}
+		highlights[*atom.EmploymentID] = append(highlights[*atom.EmploymentID], atom.Claim)
+	}
+	return highlights, placeless
 }

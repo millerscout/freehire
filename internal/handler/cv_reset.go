@@ -103,6 +103,7 @@ func (h *cvHandlers) reseedBaseFromSeed(c *fiber.Ctx, userID int64, seeded cv.Do
 // reseedBaseIfStaleVsUpload refreshes the base from bankedSeeder when it predates the
 // caller's current résumé upload. No-op when there is no base, no upload stamp, the base
 // was edited at/after the upload, or the seed is unusable.
+// Current structure: full reseed. Pending extract: header heal only (see AGENTS.md).
 func (h *cvHandlers) reseedBaseIfStaleVsUpload(c *fiber.Ctx, userID int64) error {
 	if h.resume == nil {
 		return nil
@@ -121,6 +122,17 @@ func (h *cvHandlers) reseedBaseIfStaleVsUpload(c *fiber.Ctx, userID int64) error
 	st, usable, err := h.seedSource().Structured(c.Context(), userID)
 	if err != nil || !usable {
 		return err
+	}
+	// A current structure refreshes the whole base from the seed. Provisional-only
+	// identity (pending extract) only heals the header — a full Seed would blank
+	// summary/education the candidate already has on the base.
+	if h.resume != nil {
+		if _, current, cerr := h.resume.Structured(c.Context(), userID); cerr != nil {
+			return cerr
+		} else if !current {
+			_, err := h.healRecordHeader(c.Context(), userID, base)
+			return err
+		}
 	}
 	return h.reseedBaseFromSeed(c, userID, cv.Seed(st))
 }

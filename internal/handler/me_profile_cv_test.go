@@ -23,6 +23,10 @@ type fakeStructuredResume struct {
 	ret resumeextract.Structured
 	ok  bool
 	err error
+	// provisional is identity-only contacts when the stamp is stale; provisionalOK is
+	// whether ProvisionalContacts should report them available.
+	provisional   resumeextract.Structured
+	provisionalOK bool
 	// geo is the derived candidate geography; geoOK mirrors the freshness bool. Zero
 	// values model a caller for whom nothing was derived.
 	geo   resume.Geography
@@ -33,8 +37,48 @@ func (f fakeStructuredResume) Structured(context.Context, int64) (resumeextract.
 	return f.ret, f.ok, f.err
 }
 
+func (f fakeStructuredResume) ProvisionalContacts(context.Context, int64) (resumeextract.Structured, bool, error) {
+	if f.err != nil {
+		return resumeextract.Structured{}, false, f.err
+	}
+	return f.provisional, f.provisionalOK, nil
+}
+
 func (f fakeStructuredResume) Geography(context.Context, int64) (resume.Geography, bool, error) {
 	return f.geo, f.geoOK, nil
+}
+
+func (f fakeStructuredResume) CandidateContacts(context.Context, int64) (resume.Contacts, error) {
+	if f.err != nil {
+		return resume.Contacts{}, f.err
+	}
+	if f.ok {
+		return resume.ContactsFromStructured(f.ret), nil
+	}
+	if f.provisionalOK {
+		return resume.ContactsFromStructured(f.provisional), nil
+	}
+	return resume.Contacts{}, nil
+}
+
+func (f fakeStructuredResume) StructureForSeed(context.Context, int64) (resumeextract.Structured, bool, error) {
+	if f.err != nil {
+		return resumeextract.Structured{}, false, f.err
+	}
+	if f.ok {
+		return f.ret, true, nil
+	}
+	// Pending matches Store.StructureForSeed: contacts only, no superseded semantics.
+	if f.provisionalOK {
+		return resumeextract.Structured{
+			FullName: f.provisional.FullName,
+			Email:    f.provisional.Email,
+			Phone:    f.provisional.Phone,
+			Location: f.provisional.Location,
+			Links:    append([]string(nil), f.provisional.Links...),
+		}, true, nil
+	}
+	return resumeextract.Structured{}, false, nil
 }
 
 // profileAppWithResume mounts the profile read on a handler wired to the given résumé
