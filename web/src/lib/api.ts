@@ -44,6 +44,7 @@ import type {
   VoteResult,
   ApiKey,
   CreatedApiKey,
+  ConnectedIdentities,
   SavedSearch,
   Board,
   UserProfile,
@@ -138,6 +139,22 @@ export interface InsightCompany {
   open_now: number;
   open_prev_30d: number;
   growth_30d: number;
+}
+
+/** One weekly snapshot in a skill's demand series (GET /me/market-pulse). */
+export interface SkillPulsePoint {
+  week_start: string;
+  open_count: number;
+}
+/** A signed-in user's own profile skill, joined against its retained weekly
+ *  history. change_pct is null with fewer than two snapshots, or when the
+ *  earliest snapshot's count is zero. Skills never yet seen in an open job are
+ *  omitted by the server rather than reported with a fabricated count. */
+export interface SkillPulse {
+  skill: string;
+  open_count: number;
+  change_pct: number | null;
+  series: SkillPulsePoint[];
 }
 
 /** One posting in a role cluster — a single city's opening under a collapsed role
@@ -604,6 +621,13 @@ export function createApi(
     return requestData<InsightCompany[]>(`/api/v1/insights/companies?${q.toString()}`);
   }
 
+  /** The signed-in caller's own profile skills, joined against their retained
+   *  weekly demand history (/my/market-pulse). Cookie-only, unlike the public
+   *  insights* reads above. */
+  async function marketPulse(): Promise<SkillPulse[]> {
+    return requestData<SkillPulse[]>('/api/v1/me/market-pulse');
+  }
+
   // --- Sitemap --------------------------------------------------------------
   //
   // Feeds behind the sitemap index (server routes only). Jobs ship their freshest
@@ -697,6 +721,24 @@ export function createApi(
   /** Change a known password. Other sessions are revoked; this one is re-issued. */
   async function changePassword(currentPassword: string, password: string): Promise<void> {
     await call('/api/v1/me/password', jsonBody('POST', { current_password: currentPassword, password }));
+  }
+
+  async function reauthenticatePassword(password: string): Promise<string> {
+    const result = await requestData<{ recent_auth_expires_at: string }>(
+      '/api/v2/auth/reauth/password', jsonBody('POST', { password }),
+    );
+    return result.recent_auth_expires_at;
+  }
+
+  async function exchangeOAuthReauthentication(code: string, codeVerifier: string): Promise<string> {
+    const result = await requestData<{ recent_auth_expires_at: string }>(
+      '/api/v2/auth/oauth/exchange', jsonBody('POST', { code, code_verifier: codeVerifier }),
+    );
+    return result.recent_auth_expires_at;
+  }
+
+  function connectedIdentities(): Promise<ConnectedIdentities> {
+    return requestData<ConnectedIdentities>('/api/v2/auth/identities');
   }
 
   /** Sign out everywhere: revokes every session for the account, including this one. */
@@ -1825,6 +1867,7 @@ export function createApi(
     insightsSkills,
     insightsSalaryByCategory,
     insightsCompanies,
+    marketPulse,
     sitemapJobs,
     sitemapCompanies,
     sitemapCompanyBoundaries,
@@ -1835,6 +1878,9 @@ export function createApi(
     forgotPassword,
     resetPassword,
     changePassword,
+    reauthenticatePassword,
+    exchangeOAuthReauthentication,
+    connectedIdentities,
     logoutEverywhere,
     oauthProviders,
     logout,

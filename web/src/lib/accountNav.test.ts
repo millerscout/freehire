@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { accountNav, isSectionActive, visibleAccountNav } from './accountNav';
 
 describe('accountNav config', () => {
-  it('lists the fourteen account sections', () => {
-    expect(accountNav).toHaveLength(14);
+  it('lists the fifteen account sections', () => {
+    expect(accountNav).toHaveLength(15);
   });
 
   it('offers a security section for password and session management', () => {
@@ -65,6 +65,17 @@ describe('visibleAccountNav', () => {
     expect(hrefs).toContain('/my/inbox');
     expect(hrefs).toContain('/my/assistant');
     expect(hrefs).toHaveLength(accountNav.length);
+  });
+
+  it('shows Market Pulse to everyone, gate-free (the "Beta" pill is cosmetic only)', () => {
+    for (const [mod, beta] of [
+      [false, false],
+      [true, false],
+      [false, true],
+      [true, true],
+    ] as const) {
+      expect(visibleAccountNav(mod, beta).map((i) => i.href)).toContain('/my/market-pulse');
+    }
   });
 });
 

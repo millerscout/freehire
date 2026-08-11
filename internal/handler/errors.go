@@ -25,6 +25,16 @@ const statusClientClosedRequest = 499
 // the same panic a second time (as a stackless 500).
 const LocalPanicReported = "sentry_panic_reported"
 
+type codedError struct {
+	status        int
+	code, message string
+}
+
+func (e *codedError) Error() string { return e.message }
+func authError(status int, code, message string) error {
+	return &codedError{status: status, code: code, message: message}
+}
+
 // RenderError is the single place every error returned by a handler becomes an
 // HTTP response. It is wired into fiber.New so the error envelope (`{"error":
 // ...}`, mirroring the `{"data": ...}` success shape) and the status mapping
@@ -46,6 +56,10 @@ const LocalPanicReported = "sentry_panic_reported"
 // than normal client traffic. When Sentry is disabled the hub is absent and the
 // capture is skipped — panics are handled separately by the middleware itself.
 func RenderError(c *fiber.Ctx, err error) error {
+	var ce *codedError
+	if errors.As(err, &ce) {
+		return c.Status(ce.status).JSON(fiber.Map{"error": ce.message, "code": ce.code})
+	}
 	status, msg, report := classify(err)
 
 	// Report only genuine, not-yet-reported faults. A recovered panic is already
@@ -58,6 +72,16 @@ func RenderError(c *fiber.Ctx, err error) error {
 	}
 
 	return c.Status(status).JSON(fiber.Map{"error": msg})
+}
+
+// reportUnexpected sends err to Sentry as a genuine fault. It exists for call
+// sites that build their own response — a redirect, typically — instead of
+// returning through RenderError, but still want the same "only real faults
+// reach the error inbox" gate RenderError applies to everything else.
+func reportUnexpected(c *fiber.Ctx, err error) {
+	if hub := sentryfiber.GetHubFromContext(c); hub != nil {
+		hub.CaptureException(err)
+	}
 }
 
 // classify maps an error to its HTTP status and message and reports whether it is

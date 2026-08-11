@@ -76,6 +76,16 @@ type Querier interface {
 	// the vocabulary stays in Go where a pin test guards it. Mail from an unrecognised store
 	// is skipped rather than defaulted: an unknown provenance must not read as observed.
 	BackfillEmployerReplyEvents(ctx context.Context, arg BackfillEmployerReplyEventsParams) (BackfillEmployerReplyEventsRow, error)
+	// Retroactively snapshots one past ISO week, computing each skill's open-job
+	// count "as of" @as_of (that week's Monday, midnight UTC) directly from
+	// jobs.created_at/closed_at — the same open_at(D) formula
+	// RebuildInsightsSkillStatsGlobal already trusts for its 30-day-back
+	// comparison, just evaluated at an arbitrary past instant instead of "now -
+	// 30d". A skill absent from the GROUP BY output was open in zero jobs as of
+	// that date, so it correctly contributes no row. ON CONFLICT DO NOTHING is
+	// what makes this safe to run over a week the live weekly writer already
+	// recorded: the real snapshot is never overwritten by a backfilled one.
+	BackfillInsightsSkillHistoryWeek(ctx context.Context, arg BackfillInsightsSkillHistoryWeekParams) (int64, error)
 	// Find the ashby board already carrying a job with this Ashby job id — for company careers
 	// pages that embed Ashby via the ashby_jid widget param (the board slug is JS-rendered, absent
 	// from the URL/markup). external_id is "<board>:<uuid>"; served by the
@@ -323,6 +333,10 @@ type Querier interface {
 	// under-closing is the correct bias when there is no evidence to appeal to. Idempotent via
 	// WHERE closed_at IS NULL: a cron worker runs this repeatedly and closes each row once.
 	CloseStaleUnsignalledJobs(ctx context.Context, arg CloseStaleUnsignalledJobsParams) (int64, error)
+	// Row-by-row sweep fallback (see UnseenJobIDs): closes with the same 'unseen' reason
+	// as the bulk sweep, one id at a time, so a single row's error (e.g. corrupted index
+	// entry) can be caught and skipped by the caller without losing the rest of the batch.
+	CloseUnseenJobByID(ctx context.Context, id int64) (int64, error)
 	// Post-ingest sweep (see job-lifecycle spec): close every open job of ONE source not
 	// seen since the cutoff, scoped to the company slugs the run actually crawled. Scoped
 	// by source because ingest runs per provider (a greenhouse run must not close jobs
@@ -914,6 +928,9 @@ type Querier interface {
 	// duplicate that logic in a second language and let the two drift apart; titles are cheap to
 	// ship, descriptions are not.
 	FuzzyDedupCandidateTitlesForCompany(ctx context.Context, company string) ([]FuzzyDedupCandidateTitlesForCompanyRow, error)
+	// Authentication accepts only active identities. A pending Apple revocation
+	// must not sign the user back in and silently cancel an unlink request.
+	GetActiveUserByIdentity(ctx context.Context, arg GetActiveUserByIdentityParams) (GetActiveUserByIdentityRow, error)
 	// Read one job's captured form for display. The only read path over this store, and it
 	// is by primary key — the display surface asks for exactly one posting's form, never a
 	// page of them, which is also why nothing here joins jobs.
@@ -1659,6 +1676,9 @@ type Querier interface {
 	// seniorities are the per-grade bands. Bands below the sample floor are already
 	// absent from the rollup.
 	ListInsightsSalaryByCategory(ctx context.Context, category string) ([]ListInsightsSalaryByCategoryRow, error)
+	// All retained weekly snapshots for a set of skills (a caller's own profile
+	// skills), newest first per skill.
+	ListInsightsSkillHistory(ctx context.Context, skills []string) ([]InsightsSkillHistory, error)
 	// Ranked skills within one (category, country) scope; scoping is one-dimensional
 	// (either category or country carries a value, the other is ''), matching what the
 	// rollup materializes.
@@ -2113,6 +2133,9 @@ type Querier interface {
 	// a caller-facing "delete a token" request — that goes through
 	// DeletePushToken's owner check instead.
 	PruneDeadPushToken(ctx context.Context, token string) error
+	// Drops snapshot rows older than the retention window (~26 weeks), keeping
+	// the table bounded.
+	PruneInsightsSkillHistory(ctx context.Context, cutoff pgtype.Date) (int64, error)
 	// Permanently remove a batch of jobs and record what was removed, in ONE statement.
 	// Splitting the two would let the archive drift from the deletion, and the archive is
 	// the only way to answer, after an irreversible removal, whether something was taken
@@ -2761,6 +2784,16 @@ type Querier interface {
 	// guard, which is exactly how invariants drift apart.
 	// On success, extract status is marked ok for this upload stamp.
 	SetUserResumeStructured(ctx context.Context, arg SetUserResumeStructuredParams) (int64, error)
+	// ---------------------------------------------------------------------------
+	// Skill demand history (the personal GET /me/market-pulse read)
+	// ---------------------------------------------------------------------------
+	// Appends this ISO week's global (category='', country='') skill open-counts
+	// to the history table, reading the rollup this same transaction just
+	// rebuilt rather than re-aggregating jobs. ON CONFLICT DO NOTHING is what
+	// makes this safe to call on every intra-day rollup-stats run: only the
+	// first run of a given week actually inserts, every later run this week is
+	// a no-op.
+	SnapshotInsightsSkillHistory(ctx context.Context, weekStart pgtype.Date) (int64, error)
 	// Soft-delete one message (hidden from the listing, retained for restore),
 	// scoped to the caller and idempotent. Returns 0 rows only when it is not the
 	// caller's message (→ 404).
@@ -2896,6 +2929,15 @@ type Querier interface {
 	// apply history survive unsaving. No interaction row -> pgx.ErrNoRows; the
 	// handler treats that as "already not saved", never as a failure.
 	UnsaveJob(ctx context.Context, arg UnsaveJobParams) (UnsaveJobRow, error)
+	// Same candidate set as CloseUnseenJobs, unmaterialized. The sweep's fallback path
+	// (see CloseUnseenJobByID) uses this to close row by row when the single bulk UPDATE
+	// fails — e.g. a heap/index-corrupted row aborts the whole batch (2026-08-11 incident:
+	// one duplicated jobs_pkey value blocked greenhouse's sweep on every run) — so ids are
+	// fetched separately and closed one at a time, letting one bad id be skipped without
+	// blocking the rest.
+	UnseenJobIDs(ctx context.Context, arg UnseenJobIDsParams) ([]int64, error)
+	// Row-by-row fallback candidate set for CloseUnseenJobsBySource — see UnseenJobIDs.
+	UnseenJobIDsBySource(ctx context.Context, arg UnseenJobIDsBySourceParams) ([]int64, error)
 	// Take an application off the board outright, naming the application itself.
 	//
 	// Deletes the record, matching UntrackJob: this is the candidate saying it is not a

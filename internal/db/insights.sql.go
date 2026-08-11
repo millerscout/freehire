@@ -11,6 +11,38 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const backfillInsightsSkillHistoryWeek = `-- name: BackfillInsightsSkillHistoryWeek :execrows
+INSERT INTO insights_skill_history (skill, week_start, open_count)
+SELECT skill, $1::date, count(*)::int
+FROM jobs, unnest(skills) AS skill
+WHERE created_at <= $2::timestamptz
+  AND (closed_at IS NULL OR closed_at > $2::timestamptz)
+GROUP BY skill
+ON CONFLICT (skill, week_start) DO NOTHING
+`
+
+type BackfillInsightsSkillHistoryWeekParams struct {
+	WeekStart pgtype.Date        `json:"week_start"`
+	AsOf      pgtype.Timestamptz `json:"as_of"`
+}
+
+// Retroactively snapshots one past ISO week, computing each skill's open-job
+// count "as of" @as_of (that week's Monday, midnight UTC) directly from
+// jobs.created_at/closed_at — the same open_at(D) formula
+// RebuildInsightsSkillStatsGlobal already trusts for its 30-day-back
+// comparison, just evaluated at an arbitrary past instant instead of "now -
+// 30d". A skill absent from the GROUP BY output was open in zero jobs as of
+// that date, so it correctly contributes no row. ON CONFLICT DO NOTHING is
+// what makes this safe to run over a week the live weekly writer already
+// recorded: the real snapshot is never overwritten by a backfilled one.
+func (q *Queries) BackfillInsightsSkillHistoryWeek(ctx context.Context, arg BackfillInsightsSkillHistoryWeekParams) (int64, error) {
+	result, err := q.db.Exec(ctx, backfillInsightsSkillHistoryWeek, arg.WeekStart, arg.AsOf)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteAllInsightsCompanyGrowth = `-- name: DeleteAllInsightsCompanyGrowth :exec
 
 DELETE FROM insights_company_growth
@@ -351,6 +383,35 @@ func (q *Queries) ListInsightsSalaryByCategory(ctx context.Context, category str
 	return items, nil
 }
 
+const listInsightsSkillHistory = `-- name: ListInsightsSkillHistory :many
+SELECT skill, week_start, open_count
+FROM insights_skill_history
+WHERE skill = ANY($1::text[])
+ORDER BY skill, week_start DESC
+`
+
+// All retained weekly snapshots for a set of skills (a caller's own profile
+// skills), newest first per skill.
+func (q *Queries) ListInsightsSkillHistory(ctx context.Context, skills []string) ([]InsightsSkillHistory, error) {
+	rows, err := q.db.Query(ctx, listInsightsSkillHistory, skills)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []InsightsSkillHistory{}
+	for rows.Next() {
+		var i InsightsSkillHistory
+		if err := rows.Scan(&i.Skill, &i.WeekStart, &i.OpenCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listInsightsSkills = `-- name: ListInsightsSkills :many
 SELECT skill, open_count, (open_count - open_count_prev)::int AS growth
 FROM insights_skill_stats
@@ -457,6 +518,21 @@ func (q *Queries) ListInsightsVelocity(ctx context.Context, arg ListInsightsVelo
 		return nil, err
 	}
 	return items, nil
+}
+
+const pruneInsightsSkillHistory = `-- name: PruneInsightsSkillHistory :execrows
+DELETE FROM insights_skill_history
+WHERE week_start < $1::date
+`
+
+// Drops snapshot rows older than the retention window (~26 weeks), keeping
+// the table bounded.
+func (q *Queries) PruneInsightsSkillHistory(ctx context.Context, cutoff pgtype.Date) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneInsightsSkillHistory, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const rebuildInsightsCompanyGrowth = `-- name: RebuildInsightsCompanyGrowth :execrows
@@ -857,6 +933,32 @@ GROUP BY day, facet_kind, facet_value
 // dates; the outer GROUP BY aggregates per (day, facet_kind, facet_value).
 func (q *Queries) RebuildInsightsVelocityDaily(ctx context.Context) (int64, error) {
 	result, err := q.db.Exec(ctx, rebuildInsightsVelocityDaily)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const snapshotInsightsSkillHistory = `-- name: SnapshotInsightsSkillHistory :execrows
+
+INSERT INTO insights_skill_history (skill, week_start, open_count)
+SELECT skill, $1::date, open_count
+FROM insights_skill_stats
+WHERE category = '' AND country = ''
+ON CONFLICT (skill, week_start) DO NOTHING
+`
+
+// ---------------------------------------------------------------------------
+// Skill demand history (the personal GET /me/market-pulse read)
+// ---------------------------------------------------------------------------
+// Appends this ISO week's global (category=”, country=”) skill open-counts
+// to the history table, reading the rollup this same transaction just
+// rebuilt rather than re-aggregating jobs. ON CONFLICT DO NOTHING is what
+// makes this safe to call on every intra-day rollup-stats run: only the
+// first run of a given week actually inserts, every later run this week is
+// a no-op.
+func (q *Queries) SnapshotInsightsSkillHistory(ctx context.Context, weekStart pgtype.Date) (int64, error) {
+	result, err := q.db.Exec(ctx, snapshotInsightsSkillHistory, weekStart)
 	if err != nil {
 		return 0, err
 	}

@@ -16,7 +16,10 @@ import (
 	"github.com/strelov1/freehire/internal/assistant"
 	"github.com/strelov1/freehire/internal/atscheck"
 	"github.com/strelov1/freehire/internal/auth"
+	appleauth "github.com/strelov1/freehire/internal/auth/apple"
+	"github.com/strelov1/freehire/internal/auth/mobileauth"
 	"github.com/strelov1/freehire/internal/auth/oauth"
+	"github.com/strelov1/freehire/internal/auth/recentauth"
 	"github.com/strelov1/freehire/internal/blobstore"
 	"github.com/strelov1/freehire/internal/boardresolve"
 	"github.com/strelov1/freehire/internal/browsertools"
@@ -185,14 +188,19 @@ type Config struct {
 	// Throttler backs every rate-limited route in the API (internal/ratelimit).
 	// Required — there is no degraded/nil mode, unlike the optional dependencies
 	// below.
-	Throttler      ratelimit.Throttler
-	FrontendOrigin string
-	JWTSecret      string
-	JWTTTL         time.Duration
-	CookieSecure   bool
-	CookieDomains  []string
-	OAuthRegistry  *oauth.Registry
-	Search         *search.Client
+	Throttler           ratelimit.Throttler
+	FrontendOrigin      string
+	JWTSecret           string
+	JWTTTL              time.Duration
+	CookieSecure        bool
+	CookieDomains       []string
+	OAuthRegistry       *oauth.Registry
+	AuthV2Enabled       bool
+	MobileAuthCallbacks map[string]string
+	RecentAuthTTL       time.Duration
+	AppleNative         *appleauth.Client
+	AppleGrantKeys      *appleauth.KeyRing
+	Search              *search.Client
 	// Blob backs résumé storage (internal/blobstore). Nil disables storage: résumé
 	// upload only extracts skills in-request (no regression).
 	Blob blobstore.Store
@@ -291,6 +299,12 @@ func Register(app *fiber.App, cfg Config) {
 	}
 	authH := newAuthHandlers(queries, cfg.Pool, cfg.Throttler, a.issuer, cfg.CookieSecure, cfg.CookieDomains, cfg.OAuthRegistry, cfg.FrontendOrigin, cfg.ExtensionRedirectAllowlist,
 		servedHostsOrDefault(cfg.ServedHosts, cfg.FrontendOrigin))
+	authH.authV2Enabled = cfg.AuthV2Enabled
+	authH.mobileCallbacks = cfg.MobileAuthCallbacks
+	authH.mobileAuth = mobileauth.NewStore(cfg.Pool)
+	authH.recentAuth = recentauth.NewStore(cfg.Pool, cfg.RecentAuthTTL)
+	authH.appleNative = cfg.AppleNative
+	authH.appleGrantKeys = cfg.AppleGrantKeys
 	if needsExplicitServedHosts(cfg.ServedHosts, cfg.CookieDomains) {
 		log.Printf("oauth: COOKIE_DOMAIN is set (%v) but SERVED_HOSTS is not — "+
 			"the redirect origin falls back to %s for every other host, which breaks "+
@@ -324,6 +338,10 @@ func Register(app *fiber.App, cfg Config) {
 	// The profile read serves the structured résumé beside the profile, so it needs the
 	// résumé store — hence constructed after it.
 	profileH := newProfileHandlers(profileSvc, resumeStore, newCandidateProfiler(queries))
+	// Personal skill-demand trend: the caller's own profile skills joined against the
+	// weekly insights_skill_history snapshots cmd/rollup-stats writes (see
+	// me_market_pulse.go). Reuses profileSvc rather than a second userprofile.Service.
+	marketPulseH := newMarketPulseHandlers(profileSvc, queries)
 	// The Talent Network visibility toggle is a distinct singleton on `users`, not part
 	// of the user_profiles-backed profileHandlers above (see me_talent_network.go).
 	talentNetworkH := newTalentNetworkHandlers(queries)
@@ -402,7 +420,8 @@ func Register(app *fiber.App, cfg Config) {
 	// to erase there, which must not stop a member from leaving.
 	// The gateway credential is the third external system erasure spans, after object
 	// storage and Google. It is attached below, once the resolver exists.
-	accountDeletion := accountdelete.New(accountdelete.NewQueriesRepository(queries), cfg.Blob, inboxH.revokeGmailGrant)
+	accountDeletion := accountdelete.New(accountdelete.NewQueriesRepository(queries), cfg.Blob, inboxH.revokeGmailGrant).
+		WithAppleGrants(authH.mobileAuth.ReleaseAppleGrantsForDeletion)
 	authH.withAccountDeletion(accountDeletion, queries)
 	// Assign only when configured: a nil *search.Client wrapped in the searcher
 	// interface would be a non-nil interface and defeat the nil check.
@@ -602,9 +621,11 @@ func Register(app *fiber.App, cfg Config) {
 
 	// API-key management and the auth surface (see authHandlers).
 	authH.register(api, mw)
+	authH.registerV2(app.Group("/api/v2"), mw)
 
 	// The per-user profile singleton (see profileHandlers).
 	profileH.register(api, mw)
+	marketPulseH.register(api, mw)
 	experienceH.register(api, mw)
 	talentNetworkH.register(api, mw)
 	talentNetworkProfileH.register(api)
