@@ -55,11 +55,13 @@ func (s *Store) WorkHistory(ctx context.Context, userID int64) ([]resumeextract.
 }
 
 // SeedHistory is the bank projection CV seed needs: jobs and projects kept apart, with
-// flags so the seeder knows whether to fall back to the structured résumé.
+// flags so the seeder knows whether to fall back to the structured résumé. The two flags
+// are independent — a bank holding only project-kind rows must not be read as "has job
+// history" (or the seeder would blank real roles the structure still has), and vice versa.
 type SeedHistory struct {
 	Experience            []resumeextract.Experience
 	Projects              []resumeextract.Project
-	HasEmployments        bool
+	HasJobEmployments     bool
 	HasProjectEmployments bool
 }
 
@@ -120,7 +122,7 @@ func experienceFromBank(employments []Employment, atoms []Atom) []resumeextract.
 
 func seedHistoryFromBank(employments []Employment, atoms []Atom) SeedHistory {
 	highlights, placeless := publishableHighlights(atoms)
-	out := SeedHistory{HasEmployments: len(employments) > 0}
+	var out SeedHistory
 	for _, e := range employments {
 		hs := highlights[e.ID]
 		if e.Kind == KindProject {
@@ -150,6 +152,10 @@ func seedHistoryFromBank(employments []Employment, atoms []Atom) SeedHistory {
 	if len(placeless) > 0 {
 		out.Experience = append(out.Experience, resumeextract.Experience{Highlights: placeless})
 	}
+	// Job-kind rows and placeless evidence both land in Experience; a bank that only ever
+	// held project-kind rows leaves it empty, and the seeder must fall back to the
+	// structure rather than reading "the bank was touched at all" as "the bank owns roles".
+	out.HasJobEmployments = len(out.Experience) > 0
 	return out
 }
 

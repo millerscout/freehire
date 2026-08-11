@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,8 +54,12 @@ func (f *fakeResumeBlobs) Delete(_ context.Context, key string) error {
 var resumeUploadedAt = time.Unix(1_700_000_000, 0).UTC()
 
 // fakeResumeRepo is an in-memory résumé-pointer Repository. Set stamps a timestamp,
-// mirroring the SQL now().
+// mirroring the SQL now(). RetryResumeParse spawns a background goroutine
+// (extractStructuredResume) that writes the extract-status fields independently of the
+// request goroutine, so every accessor takes mu — a test reading these fields right after
+// an HTTP call would otherwise race that goroutine's write.
 type fakeResumeRepo struct {
+	mu          sync.Mutex
 	key         string
 	set         bool
 	embVec      []float64
@@ -74,6 +79,8 @@ type fakeResumeRepo struct {
 }
 
 func (r *fakeResumeRepo) Get(_ context.Context, _ int64) (db.GetUserResumeRow, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if !r.set {
 		return db.GetUserResumeRow{}, nil
 	}
@@ -84,6 +91,8 @@ func (r *fakeResumeRepo) Get(_ context.Context, _ int64) (db.GetUserResumeRow, e
 }
 
 func (r *fakeResumeRepo) Set(_ context.Context, _ int64, key string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.key, r.set = key, true
 	r.extractStatus, r.extractDetail = resume.ExtractStatusPending, ""
 	r.extractFor = pgtype.Timestamptz{Time: resumeUploadedAt, Valid: true}
@@ -91,6 +100,8 @@ func (r *fakeResumeRepo) Set(_ context.Context, _ int64, key string) error {
 }
 
 func (r *fakeResumeRepo) Clear(_ context.Context, _ int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	// Mirrors ClearUserResume: clears pointer + extract artifacts, keeps candidate contacts.
 	r.key, r.set = "", false
 	r.structured, r.structModel, r.structAt = nil, "", pgtype.Timestamptz{}
@@ -99,25 +110,33 @@ func (r *fakeResumeRepo) Clear(_ context.Context, _ int64) error {
 }
 
 func (r *fakeResumeRepo) SetEmbedding(_ context.Context, _ int64, vec []float64, model string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.embVec, r.embModel = vec, model
 	return nil
 }
 
 func (r *fakeResumeRepo) GetEmbedding(_ context.Context, _ int64) (db.GetUserResumeEmbeddingRow, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return db.GetUserResumeEmbeddingRow{
 		ResumeEmbedding:      r.embVec,
 		ResumeEmbeddingModel: pgtype.Text{String: r.embModel, Valid: r.embModel != ""},
 	}, nil
 }
 
-func (r *fakeResumeRepo) SetStructured(_ context.Context, w resume.StructuredWrite) error {
+func (r *fakeResumeRepo) SetStructured(_ context.Context, w resume.StructuredWrite) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.structured, r.structModel = w.Blob, w.Model
 	r.structAt = pgtype.Timestamptz{Time: w.UploadedAt, Valid: true}
 	r.structCountries, r.structRegions = w.Countries, w.Regions
-	return nil
+	return true, nil
 }
 
 func (r *fakeResumeRepo) GetStructured(_ context.Context, _ int64) (db.GetUserResumeStructuredRow, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	row := db.GetUserResumeStructuredRow{
 		ResumeStructured:           r.structured,
 		ResumeStructuredModel:      pgtype.Text{String: r.structModel, Valid: r.structModel != ""},
@@ -379,15 +398,30 @@ func TestResume_RetryParseMarksPending(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
+	// The handler's own response reflects the SYNCHRONOUS MarkExtractPending call, made
+	// before RetryResumeParse spawns the background extraction goroutine — race-free.
 	if out.Data.ParseStatus != resume.ExtractStatusPending {
 		t.Fatalf("parse_status = %q, want pending", out.Data.ParseStatus)
 	}
-	if repo.extractStatus != resume.ExtractStatusPending {
-		t.Fatalf("repo extract status = %q, want pending", repo.extractStatus)
+
+	// RetryResumeParse's background goroutine (extractStructuredResume) settles the repo's
+	// status on its own schedule, independently of the request goroutine — reading
+	// repo.extractStatus directly right here raced that write. This fixture wires no
+	// structuredExtractor, so the goroutine always takes the "extractor unavailable" path
+	// and settles on "failed"; wait for that instead of asserting a value that depended on
+	// which goroutine the scheduler happened to run first.
+	deadline := time.Now().Add(2 * time.Second)
+	for repo.ExtractStatus() != resume.ExtractStatusFailed {
+		if time.Now().After(deadline) {
+			t.Fatalf("repo extract status = %q, want failed (extractor unavailable) before timeout", repo.ExtractStatus())
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
 func (r *fakeResumeRepo) GetGeography(_ context.Context, _ int64) (db.GetUserResumeGeographyRow, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	row := db.GetUserResumeGeographyRow{
 		ResumeCountries:            r.structCountries,
 		ResumeRegions:              r.structRegions,
@@ -400,21 +434,37 @@ func (r *fakeResumeRepo) GetGeography(_ context.Context, _ int64) (db.GetUserRes
 }
 
 func (r *fakeResumeRepo) GetCandidateContacts(_ context.Context, _ int64) ([]byte, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.contacts, nil
 }
 
 func (r *fakeResumeRepo) SetCandidateContacts(_ context.Context, _ int64, blob []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.contacts = blob
 	return nil
 }
 
+// ExtractStatus is a thread-safe snapshot for tests to poll — reading the field
+// directly races the background extraction goroutine RetryResumeParse spawns.
+func (r *fakeResumeRepo) ExtractStatus() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.extractStatus
+}
+
 func (r *fakeResumeRepo) SetExtractFailed(_ context.Context, _ int64, detail string, uploadedAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.extractStatus, r.extractDetail = "failed", detail
 	r.extractFor = pgtype.Timestamptz{Time: uploadedAt, Valid: true}
 	return nil
 }
 
 func (r *fakeResumeRepo) SetExtractPending(_ context.Context, _ int64, uploadedAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.extractStatus, r.extractDetail = "pending", ""
 	r.extractFor = pgtype.Timestamptz{Time: uploadedAt, Valid: true}
 	return nil

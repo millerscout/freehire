@@ -712,6 +712,62 @@ func TestTailorCVBootstrap_PendingStructureDoesNotBlankHeader(t *testing.T) {
 	}
 }
 
+// A newer, CURRENT structured extract that itself carries identity alone (e.g. an
+// extraction that only recovered a name) must not blank the base's existing body either —
+// "current" is not the same as "has body content". Mirrors the pending-structure case
+// above but for the "current, yet bodyless" seed hasSeedBody exists to catch.
+func TestTailorCVBootstrap_IdentityOnlyCurrentStructureDoesNotBlankBase(t *testing.T) {
+	h, iss, pool := newTailorAPI(t)
+	app := buildTailorApp(h, iss)
+	ctx := context.Background()
+
+	user := seedAccount(t, pool, "identity-only-current@example.test", true)
+	tok, _ := iss.Issue(user, testTokenVersion)
+
+	oldAt := time.Now().Add(-2 * time.Hour).Truncate(time.Microsecond)
+	base, err := h.cvStore.Create(ctx, user, "My CV", cv.DefaultTemplateID, cv.Document{
+		Header:     cv.Header{FullName: "Old Base Name"},
+		Summary:    "hand-written summary I typed myself",
+		Experience: []cv.ExperienceItem{{Company: "Real Job I Had"}},
+	})
+	if err != nil {
+		t.Fatalf("create base: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE cvs SET updated_at = $2 WHERE id = $1`, base.ID, oldAt); err != nil {
+		t.Fatalf("backdate base: %v", err)
+	}
+
+	newAt := time.Now().Truncate(time.Microsecond)
+	newBlob, _ := json.Marshal(resumeextract.Structured{FullName: "Ada Lovelace"})
+	if _, err := pool.Exec(ctx,
+		`UPDATE users SET resume_object_key = 'k', resume_uploaded_at = $2,
+		 resume_structured = $3, resume_structured_uploaded_at = $2 WHERE id = $1`,
+		user, newAt, newBlob); err != nil {
+		t.Fatalf("seed identity-only current résumé: %v", err)
+	}
+
+	jobID := seedJobSlug(t, pool, "identity-only-current-job")
+	seedAnalysis(t, h, user, jobID)
+
+	resp := doCV(t, app, fiber.MethodPost, "/api/v1/me/cvs/tailor", tok, tailorCVRequest{JobSlug: "identity-only-current-job"})
+	if resp.StatusCode != fiber.StatusCreated {
+		t.Fatalf("bootstrap = %d, want 201", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	refreshed, ok, err := h.cvStore.BaseCV(ctx, user)
+	if err != nil || !ok {
+		t.Fatalf("BaseCV: ok=%v err=%v", ok, err)
+	}
+	if refreshed.Document.Summary != "hand-written summary I typed myself" || len(refreshed.Document.Experience) != 1 {
+		t.Fatalf("base body blanked by identity-only reseed: summary=%q experience=%+v",
+			refreshed.Document.Summary, refreshed.Document.Experience)
+	}
+	if refreshed.Document.Header.FullName != "Old Base Name" {
+		t.Fatalf("header = %+v, want existing name kept (heal is keep-first)", refreshed.Document.Header)
+	}
+}
+
 func TestTailorCVBootstrap_KeepsBaseEditedAfterUpload(t *testing.T) {
 	h, iss, pool := newTailorAPI(t)
 	app := buildTailorApp(h, iss)

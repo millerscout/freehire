@@ -216,7 +216,7 @@ func TestProductionSanitizeBoundsLocked(t *testing.T) {
 	want := Bounds{
 		MaxCommentRunes:       240,
 		MaxListItemRunes:      200,
-		MaxRecommendRunes:     400,
+		MaxRecommendRunes:     1200,
 		MaxReqTextRunes:       200,
 		MaxReqEvidenceRunes:   240,
 		MaxStrengths:          6,
@@ -261,12 +261,12 @@ func TestSetBoundsRaisesRecommendationCeiling(t *testing.T) {
 	t.Cleanup(func() { SetBounds(prev) })
 
 	b := DefaultBounds()
-	b.MaxRecommendRunes = 800
+	b.MaxRecommendRunes = 2000
 	SetBounds(b)
-	over := strings.Repeat("r", 500)
+	over := strings.Repeat("r", 1500)
 	v := recruiterVerdict{Recommendation: over}
 	sanitizeVerdict(&v)
-	if got := len([]rune(v.Recommendation)); got != 500 {
-		t.Fatalf("recommendation rune len = %d, want 500 under raised ceiling", got)
+	if got := len([]rune(v.Recommendation)); got != 1500 {
+		t.Fatalf("recommendation rune len = %d, want 1500 under raised ceiling", got)
 	}
 }

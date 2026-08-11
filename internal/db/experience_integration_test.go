@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -413,8 +414,8 @@ func TestMergeExperienceAtomsIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MergeExperienceAtoms: %v", err)
 	}
-	if merged.ID != keep.ID {
-		t.Fatalf("kept id = %s, want %s", merged.ID, keep.ID)
+	if uuid.UUID(merged.ID.Bytes) != keep.ID {
+		t.Fatalf("kept id = %s, want %s", uuid.UUID(merged.ID.Bytes), keep.ID)
 	}
 	if merged.Context != "model profiles" || len(merged.Metrics) != 1 {
 		t.Errorf("merged richness: context=%q metrics=%q", merged.Context, merged.Metrics)
@@ -437,6 +438,41 @@ func TestMergeExperienceAtomsIsAtomic(t *testing.T) {
 	})
 	if !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("second merge with gone loser = %v, want pgx.ErrNoRows", err)
+	}
+}
+
+// A keep id that does not exist (wrong id, wrong owner, or deleted between
+// Store.MergeAtoms' ownership check and this call) must leave the loser untouched — the
+// merge is all-or-nothing. Regression for a bug where the DELETE ran unconditionally
+// regardless of whether the paired UPDATE matched anything.
+func TestMergeExperienceAtomsLeavesLoserWhenKeepIsGone(t *testing.T) {
+	pool := startPostgres(t)
+	q := New(pool)
+	ctx := context.Background()
+	alice := seedExperienceUser(t, pool, "merge-keepgone@example.test")
+
+	loser, err := q.InsertExperienceAtomIfNew(ctx, InsertExperienceAtomIfNewParams{
+		UserID: alice, Claim: "Untouched claim", ClaimKey: "untouched claim",
+		Provenance: "agent_inferred", Metrics: []string{}, Skills: []string{},
+	})
+	if err != nil {
+		t.Fatalf("insert loser: %v", err)
+	}
+
+	_, err = q.MergeExperienceAtoms(ctx, MergeExperienceAtomsParams{
+		Context: "x", Metrics: []string{}, Skills: []string{}, Provenance: "manual",
+		KeepID: uuid.New(), UserID: alice, LoserID: loser.ID,
+	})
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("merge with nonexistent keep = %v, want pgx.ErrNoRows", err)
+	}
+
+	atoms, err := q.ListExperienceAtoms(ctx, alice)
+	if err != nil {
+		t.Fatalf("ListExperienceAtoms: %v", err)
+	}
+	if len(atoms) != 1 || atoms[0].ID != loser.ID {
+		t.Fatalf("atoms = %+v, want the loser still present — a failed merge must delete nothing", atoms)
 	}
 }
 

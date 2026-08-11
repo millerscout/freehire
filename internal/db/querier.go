@@ -2040,11 +2040,14 @@ type Querier interface {
 	// Cursor write: mark a rotated file applied. Idempotent — a concurrent/rerun mark
 	// is a no-op, so the file is never double-applied.
 	MarkViewLogFileProcessed(ctx context.Context, arg MarkViewLogFileProcessedParams) error
-	// Atomically delete the loser and update the keep. The DELETE RETURNING CTE is the
-	// transaction: the UPDATE only lands when the delete did, so a missing/foreign loser
-	// yields no row (caller maps to not found) rather than a half-applied merge. Claim,
+	// Atomically update the keep and delete the loser. The UPDATE is the transaction: the
+	// DELETE only lands when the update did, so a keep that vanished between Store.MergeAtoms'
+	// ownership check and this call (a concurrent delete/merge) yields no row and deletes
+	// nothing, rather than deleting the loser out from under a merge whose other half never
+	// landed. The UPDATE itself is gated on the loser still existing, for the same reason in
+	// the other direction. Either both sides of the merge happen or neither does. Claim,
 	// claim_key, employment_id and source_ref stay on the keep — only richness fields move.
-	MergeExperienceAtoms(ctx context.Context, arg MergeExperienceAtomsParams) (ExperienceAtom, error)
+	MergeExperienceAtoms(ctx context.Context, arg MergeExperienceAtomsParams) (MergeExperienceAtomsRow, error)
 	// The revision a follow-on edit might be folded into. Only the newest is a candidate:
 	// coalescing into anything older would reorder the log.
 	NewestCVRevision(ctx context.Context, arg NewestCVRevisionParams) (CvRevision, error)
@@ -2757,7 +2760,7 @@ type Querier interface {
 	// nothing to gain by deferring it — and a separate write would have to duplicate the
 	// guard, which is exactly how invariants drift apart.
 	// On success, extract status is marked ok for this upload stamp.
-	SetUserResumeStructured(ctx context.Context, arg SetUserResumeStructuredParams) error
+	SetUserResumeStructured(ctx context.Context, arg SetUserResumeStructuredParams) (int64, error)
 	// Soft-delete one message (hidden from the listing, retained for restore),
 	// scoped to the caller and idempotent. Returns 0 rows only when it is not the
 	// caller's message (→ 404).

@@ -87,8 +87,33 @@ func (r queriesRepository) DeleteAtom(ctx context.Context, id uuid.UUID, userID 
 }
 
 func (r queriesRepository) MergeAtoms(ctx context.Context, userID int64, keepID, loserID uuid.UUID, a Atom) (db.ExperienceAtom, error) {
-	return r.q.MergeExperienceAtoms(ctx, db.MergeExperienceAtomsParams{
+	row, err := r.q.MergeExperienceAtoms(ctx, db.MergeExperienceAtomsParams{
 		Context: a.Context, Metrics: a.Metrics, Skills: a.Skills,
 		Provenance: string(a.Provenance), KeepID: keepID, UserID: userID, LoserID: loserID,
 	})
+	if err != nil {
+		return db.ExperienceAtom{}, err
+	}
+	// The query's final SELECT reads through a CTE alias rather than the experience_atoms
+	// table directly, so sqlc cannot trace its columns back to the sqlc.yaml uuid.UUID
+	// overrides and generates raw pgtype.UUID fields instead of the ExperienceAtom model.
+	// Same data; converted here rather than changing the Repository/Store contract.
+	atom := db.ExperienceAtom{
+		ID:         uuid.UUID(row.ID.Bytes),
+		UserID:     row.UserID,
+		Claim:      row.Claim,
+		ClaimKey:   row.ClaimKey,
+		Context:    row.Context,
+		Metrics:    row.Metrics,
+		Skills:     row.Skills,
+		Provenance: row.Provenance,
+		SourceRef:  row.SourceRef,
+		CreatedAt:  row.CreatedAt,
+		UpdatedAt:  row.UpdatedAt,
+	}
+	if row.EmploymentID.Valid {
+		id := uuid.UUID(row.EmploymentID.Bytes)
+		atom.EmploymentID = &id
+	}
+	return atom, nil
 }

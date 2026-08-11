@@ -248,7 +248,7 @@ type MatchAnalysisSettings struct {
 	MaxCommentRunes int
 	// MaxListItemRunes caps each Strengths / Gaps bullet (default 200).
 	MaxListItemRunes int
-	// MaxRecommendRunes caps the free-text Recommendation (default 400).
+	// MaxRecommendRunes caps the free-text Recommendation (default 1200).
 	MaxRecommendRunes int
 	// MaxReqTextRunes caps Requirement.Text (default 200).
 	MaxReqTextRunes int
@@ -324,7 +324,7 @@ func Load() Settings {
 		MatchAnalysis: MatchAnalysisSettings{
 			MaxCommentRunes:       envInt("MATCH_ANALYSIS_MAX_COMMENT_RUNES", 240),
 			MaxListItemRunes:      envInt("MATCH_ANALYSIS_MAX_LIST_ITEM_RUNES", 200),
-			MaxRecommendRunes:     envInt("MATCH_ANALYSIS_MAX_RECOMMEND_RUNES", 400),
+			MaxRecommendRunes:     envInt("MATCH_ANALYSIS_MAX_RECOMMEND_RUNES", 1200),
 			MaxReqTextRunes:       envInt("MATCH_ANALYSIS_MAX_REQ_TEXT_RUNES", 200),
 			MaxReqEvidenceRunes:   envInt("MATCH_ANALYSIS_MAX_REQ_EVIDENCE_RUNES", 240),
 			MaxStrengths:          envInt("MATCH_ANALYSIS_MAX_STRENGTHS", 6),

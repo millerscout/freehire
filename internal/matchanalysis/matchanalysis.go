@@ -93,17 +93,17 @@ const (
 // yields a non-positive value falls back to the matching default so a bound can
 // never be erased.
 const (
-	DefaultMaxCommentRunes       = 240 // per-dimension Comment
-	DefaultMaxListItemRunes      = 200 // each Strengths / Gaps bullet
-	DefaultMaxRecommendRunes     = 400 // free-text Recommendation
-	DefaultMaxReqTextRunes       = 200 // Requirement.Text
-	DefaultMaxReqEvidenceRunes   = 240 // Requirement.Evidence
-	DefaultMaxStrengths          = 6   // Strengths list length
-	DefaultMaxGaps               = 6   // Gaps list length
-	DefaultMaxRequirements       = 30  // RequirementMatch list length
-	DefaultMaxSignals            = 5   // HiddenSignals list length
-	DefaultMaxSignalQuoteRunes   = 200 // Signal.Quote
-	DefaultMaxSignalInsightRunes = 200 // Signal.Insight
+	DefaultMaxCommentRunes       = 240  // per-dimension Comment
+	DefaultMaxListItemRunes      = 200  // each Strengths / Gaps bullet
+	DefaultMaxRecommendRunes     = 1200 // free-text Recommendation: two or three short prose paragraphs
+	DefaultMaxReqTextRunes       = 200  // Requirement.Text
+	DefaultMaxReqEvidenceRunes   = 240  // Requirement.Evidence
+	DefaultMaxStrengths          = 6    // Strengths list length
+	DefaultMaxGaps               = 6    // Gaps list length
+	DefaultMaxRequirements       = 30   // RequirementMatch list length
+	DefaultMaxSignals            = 5    // HiddenSignals list length
+	DefaultMaxSignalQuoteRunes   = 200  // Signal.Quote
+	DefaultMaxSignalInsightRunes = 200  // Signal.Insight
 )
 
 // Live sanitize caps — start at the defaults above; SetBounds may raise or lower them.

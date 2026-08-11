@@ -374,7 +374,7 @@
     <!-- Streaming: stage stepper + thinking. Idle cold starts used to render the same
          pending stepper with nothing driving it (tailor sets autoRun=false), which looked
          like Extract & Match / Recruiter verdict were hung. Show an explicit Run when idle. -->
-    {#if !blockedNew && streaming}
+    {#if !blockedNew && (streaming || recovering)}
       <section class="rounded-2xl border border-border bg-card p-6 sm:px-8">
         <!-- Stage stepper: evenly-spaced nodes over a single connecting rail. -->
         <div class="relative flex">
@@ -420,7 +420,7 @@
         <p class="text-sm text-muted-foreground">
           Run the three-stage fit analysis — Extract &amp; Match, Recruiter verdict, then Adversarial audit.
         </p>
-        <Button variant="primary" size="sm" onclick={start} disabled={streaming}>
+        <Button variant="primary" size="sm" onclick={start} disabled={streaming || recovering}>
           <RefreshCw class="size-3.5" /> Run analysis
         </Button>
       </div>

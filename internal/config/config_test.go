@@ -152,7 +152,7 @@ func TestLoad_MatchAnalysisDefaults(t *testing.T) {
 	}
 	s := Load()
 	want := MatchAnalysisSettings{
-		MaxCommentRunes: 240, MaxListItemRunes: 200, MaxRecommendRunes: 400,
+		MaxCommentRunes: 240, MaxListItemRunes: 200, MaxRecommendRunes: 1200,
 		MaxReqTextRunes: 200, MaxReqEvidenceRunes: 240,
 		MaxStrengths: 6, MaxGaps: 6, MaxRequirements: 30,
 		MaxSignals: 5, MaxSignalQuoteRunes: 200, MaxSignalInsightRunes: 200,

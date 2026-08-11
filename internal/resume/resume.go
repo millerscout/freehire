@@ -71,9 +71,13 @@ type Repository interface {
 	SetEmbedding(ctx context.Context, userID int64, vec []float64, model string) error
 	GetEmbedding(ctx context.Context, userID int64) (db.GetUserResumeEmbeddingRow, error)
 	// SetStructured persists the derived structured résumé and the geography derived from
-	// it, as one write. GetStructured reads the blob, its stamps, and the current résumé
-	// upload time so the Store can tell whether the structure still describes the stored CV.
-	SetStructured(ctx context.Context, w StructuredWrite) error
+	// it, as one write, guarded by the monotonic `resume_uploaded_at = w.UploadedAt` stamp
+	// check. applied reports whether the guard matched: false means a slow/late write for a
+	// since-superseded CV was correctly dropped, and the caller must not treat it as if it
+	// had landed (see Store.SetStructured). GetStructured reads the blob, its stamps, and
+	// the current résumé upload time so the Store can tell whether the structure still
+	// describes the stored CV.
+	SetStructured(ctx context.Context, w StructuredWrite) (applied bool, err error)
 	GetStructured(ctx context.Context, userID int64) (db.GetUserResumeStructuredRow, error)
 	// GetGeography reads the derived candidate geography plus the two stamps needed to
 	// judge whether it still describes the stored CV.
@@ -183,7 +187,7 @@ func (s *Store) SetStructured(ctx context.Context, userID int64, st resumeextrac
 		return fmt.Errorf("resume: marshal structured: %w", err)
 	}
 	countries, regions, cities := DeriveGeography(st.Location)
-	if err := s.repo.SetStructured(ctx, StructuredWrite{
+	applied, err := s.repo.SetStructured(ctx, StructuredWrite{
 		UserID:     userID,
 		Blob:       blob,
 		Model:      model,
@@ -191,8 +195,16 @@ func (s *Store) SetStructured(ctx context.Context, userID int64, st resumeextrac
 		Countries:  countries,
 		Regions:    regions,
 		Cities:     cities,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
+	}
+	if !applied {
+		// The monotonic stamp guard dropped this write: a since-superseded upload's
+		// extraction landed after a newer one replaced it. Filling contacts from st here
+		// would let a stale/late extraction leak into candidate-owned contacts and get
+		// stuck there forever (FillEmpty never overwrites a non-empty owned field again).
+		return nil
 	}
 	// Fill-empty into owned contacts; never overwrite hand edits.
 	if err := s.FillEmptyContactsFromStructured(ctx, userID, st); err != nil {
@@ -579,8 +591,8 @@ func (r *QueriesRepository) GetEmbedding(ctx context.Context, userID int64) (db.
 	return r.q.GetUserResumeEmbedding(ctx, userID)
 }
 
-func (r *QueriesRepository) SetStructured(ctx context.Context, w StructuredWrite) error {
-	return r.q.SetUserResumeStructured(ctx, db.SetUserResumeStructuredParams{
+func (r *QueriesRepository) SetStructured(ctx context.Context, w StructuredWrite) (bool, error) {
+	rows, err := r.q.SetUserResumeStructured(ctx, db.SetUserResumeStructuredParams{
 		ID:                         w.UserID,
 		ResumeStructured:           w.Blob,
 		ResumeStructuredModel:      pgtype.Text{String: w.Model, Valid: w.Model != ""},
@@ -589,6 +601,10 @@ func (r *QueriesRepository) SetStructured(ctx context.Context, w StructuredWrite
 		ResumeRegions:              w.Regions,
 		ResumeCities:               w.Cities,
 	})
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 func (r *QueriesRepository) GetStructured(ctx context.Context, userID int64) (db.GetUserResumeStructuredRow, error) {

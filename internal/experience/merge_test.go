@@ -42,15 +42,34 @@ func TestUnionForMergeScreenshotPair(t *testing.T) {
 	}
 }
 
-func TestMergeProvenancePublishableSibling(t *testing.T) {
-	keep := Atom{Claim: "a", Provenance: ProvenanceAgentInferred}
-	lose := Atom{Claim: "b", Provenance: ProvenanceStatedInChat, Context: "situation"}
+// unionForMerge must never let the discarded (lose) atom's provenance leak onto the
+// surviving Claim text. The merged Claim is always keep's verbatim, so provenance must
+// follow keep — not lose — even when lose happens to be publishable and keep is not.
+// Regression: an agent_inferred claim must not become eligible for the CV evidence gate
+// just because the atom it was merged with was candidate-confirmed.
+func TestUnionForMergeProvenanceFollowsKeepNotLose(t *testing.T) {
+	keep := Atom{Claim: "unconfirmed embellished claim", Provenance: ProvenanceAgentInferred}
+	lose := Atom{Claim: "confirmed short claim", Provenance: ProvenanceStatedInChat, Context: "situation"}
 	got := unionForMerge(keep, lose)
-	if got.Provenance != ProvenanceStatedInChat {
-		t.Errorf("provenance = %q, want stated_in_chat", got.Provenance)
+	if got.Claim != keep.Claim {
+		t.Fatalf("claim = %q, want keep's claim to survive", got.Claim)
 	}
-	if !got.Provenance.Publishable() {
-		t.Error("merged atom should be publishable")
+	if got.Provenance != ProvenanceAgentInferred {
+		t.Errorf("provenance = %q, want agent_inferred (keep's own) — must not be laundered publishable via lose", got.Provenance)
+	}
+	if got.Provenance.Publishable() {
+		t.Error("merged atom must not be publishable: its surviving claim was never candidate-asserted")
+	}
+}
+
+// The mirror: when the surviving claim is the candidate-confirmed one, the merge is
+// correctly publishable — losing an unconfirmed sibling's content must not downgrade it.
+func TestUnionForMergeProvenanceStaysPublishableWhenKeepIs(t *testing.T) {
+	keep := Atom{Claim: "confirmed claim", Provenance: ProvenanceStatedInChat}
+	lose := Atom{Claim: "unconfirmed sibling", Provenance: ProvenanceAgentInferred}
+	got := unionForMerge(keep, lose)
+	if got.Provenance != ProvenanceStatedInChat || !got.Provenance.Publishable() {
+		t.Errorf("provenance = %q, want stated_in_chat/publishable (keep's own)", got.Provenance)
 	}
 }
 

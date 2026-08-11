@@ -90,6 +90,29 @@ func TestHealToolArgumentsStripsHaikuXMLTrailer(t *testing.T) {
 	}
 }
 
+func TestLooksConcatenatedDetectsTwoJSONValues(t *testing.T) {
+	if !looksConcatenated(`{"ops":[1]}{"ops":[2]}`) {
+		t.Error("want true for two complete JSON objects with no separator")
+	}
+	if !looksConcatenated(`{"a":1} {"b":2}`) {
+		t.Error("want true even with whitespace between the two values")
+	}
+}
+
+func TestLooksConcatenatedFalseForTrailerJunkAndValidJSON(t *testing.T) {
+	// The Haiku XML-trailer case healToolArguments patches — not a second value.
+	poisoned := `{"ops":[1]}` + "\n</invoke>\": \"\"}"
+	if looksConcatenated(poisoned) {
+		t.Error("want false: trailing non-JSON junk is trailer noise, not a second call")
+	}
+	if looksConcatenated(`{"ops":[1]}`) {
+		t.Error("want false for already-valid single JSON")
+	}
+	if looksConcatenated("") {
+		t.Error("want false for empty args")
+	}
+}
+
 func TestAssistantMessageWithoutTextOmitsTheTextPart(t *testing.T) {
 	// A pure tool-call turn has no prose. Sending an empty text part back to the
 	// model is a malformed message for some providers, so it must not be emitted.

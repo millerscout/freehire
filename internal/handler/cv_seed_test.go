@@ -39,7 +39,7 @@ func TestBankedSeederTakesExperienceFromTheBank(t *testing.T) {
 			Experience: []resumeextract.Experience{{Company: "STALE"}},
 		}},
 		bank: stubHistory{hist: experience.SeedHistory{
-			HasEmployments: true,
+			HasJobEmployments: true,
 			Experience: []resumeextract.Experience{
 				{Company: "RingCentral", Title: "SWE", Highlights: []string{"Confirmed in chat"}},
 			},
@@ -83,8 +83,8 @@ func TestBankedSeederBankAloneIsNotUsable(t *testing.T) {
 	seeder := bankedSeeder{
 		resume: fakeStructuredResume{ok: false},
 		bank: stubHistory{hist: experience.SeedHistory{
-			HasEmployments: true,
-			Experience:     []resumeextract.Experience{{Company: "RingCentral"}},
+			HasJobEmployments: true,
+			Experience:        []resumeextract.Experience{{Company: "RingCentral"}},
 		}},
 	}
 
@@ -113,8 +113,8 @@ func TestBankedSeederProvisionalContactsPlusBankIsUsable(t *testing.T) {
 			},
 		},
 		bank: stubHistory{hist: experience.SeedHistory{
-			HasEmployments: true,
-			Experience:     []resumeextract.Experience{{Company: "RingCentral", Title: "SWE"}},
+			HasJobEmployments: true,
+			Experience:        []resumeextract.Experience{{Company: "RingCentral", Title: "SWE"}},
 		}},
 	}
 
@@ -291,7 +291,7 @@ func TestBankedSeederEmptyBankFallsBackToStructureExperience(t *testing.T) {
 			Experience: []resumeextract.Experience{{Company: "Analytical Engines", Title: "Engineer"}},
 			Projects:   []resumeextract.Project{{Name: "opensched", Link: "https://opensched.dev"}},
 		}},
-		bank: stubHistory{}, // HasEmployments false
+		bank: stubHistory{}, // HasJobEmployments/HasProjectEmployments both false
 	}
 
 	st, ok, err := seeder.Structured(context.Background(), 1)
@@ -313,7 +313,6 @@ func TestBankedSeederUsesBankProjectsWhenPresent(t *testing.T) {
 			Projects: []resumeextract.Project{{Name: "STALE", Link: "https://stale.example"}},
 		}},
 		bank: stubHistory{hist: experience.SeedHistory{
-			HasEmployments:        true,
 			HasProjectEmployments: true,
 			Projects: []resumeextract.Project{
 				{Name: "telagon.io", Link: "https://telagon.io", Highlights: []string{"1.4M+ channels"}},
@@ -326,10 +325,39 @@ func TestBankedSeederUsesBankProjectsWhenPresent(t *testing.T) {
 		t.Fatalf("Structured = ok:%v err:%v", ok, err)
 	}
 	if len(st.Experience) != 0 {
-		t.Errorf("experience = %+v, want none when the bank has only projects", st.Experience)
+		t.Errorf("experience = %+v, want none when the structure has none and the bank has only projects", st.Experience)
 	}
 	if len(st.Projects) != 1 || st.Projects[0].Name != "telagon.io" || st.Projects[0].Link != "https://telagon.io" {
 		t.Errorf("projects = %+v, want banked project with link", st.Projects)
+	}
+}
+
+// The regression this PR shipped with: a candidate with a résumé that HAS real job history,
+// plus a bank holding only a project-kind row, must keep the structure's Experience — not
+// have it blanked because the bank was "touched" at all. See professional.go HasJobEmployments.
+func TestBankedSeederPreservesStructureExperienceWhenBankHasOnlyProjects(t *testing.T) {
+	seeder := bankedSeeder{
+		resume: fakeStructuredResume{ok: true, ret: resumeextract.Structured{
+			FullName:   "Ada Lovelace",
+			Experience: []resumeextract.Experience{{Company: "Acme", Title: "SWE"}},
+		}},
+		bank: stubHistory{hist: experience.SeedHistory{
+			HasProjectEmployments: true,
+			Projects: []resumeextract.Project{
+				{Name: "telagon.io", Link: "https://telagon.io"},
+			},
+		}},
+	}
+
+	st, ok, err := seeder.Structured(context.Background(), 1)
+	if err != nil || !ok {
+		t.Fatalf("Structured = ok:%v err:%v", ok, err)
+	}
+	if len(st.Experience) != 1 || st.Experience[0].Company != "Acme" {
+		t.Errorf("experience = %+v, want the structure's real job history preserved", st.Experience)
+	}
+	if len(st.Projects) != 1 || st.Projects[0].Name != "telagon.io" {
+		t.Errorf("projects = %+v, want the banked project", st.Projects)
 	}
 }
 
@@ -340,8 +368,8 @@ func TestBankedSeederKeepsStructureProjectsWhenBankHasJobsOnly(t *testing.T) {
 			Projects: []resumeextract.Project{{Name: "opensched", Link: "https://opensched.dev"}},
 		}},
 		bank: stubHistory{hist: experience.SeedHistory{
-			HasEmployments: true,
-			Experience:     []resumeextract.Experience{{Company: "RingCentral", Title: "SWE"}},
+			HasJobEmployments: true,
+			Experience:        []resumeextract.Experience{{Company: "RingCentral", Title: "SWE"}},
 		}},
 	}
 

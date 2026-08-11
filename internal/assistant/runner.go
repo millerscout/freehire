@@ -332,7 +332,17 @@ func (r *Runner) runToolCalls(ctx context.Context, sess Session, reg *Registry, 
 			continue
 		}
 		name := call.FunctionCall.Name
-		args := json.RawMessage(healToolArguments(call.FunctionCall.Arguments))
+		raw := call.FunctionCall.Arguments
+		var args json.RawMessage
+		if looksConcatenated(raw) {
+			// Two complete JSON values with no separator: the model intended a second
+			// call. healToolArguments would keep only the first, silently dropping the
+			// second — pass the raw string through instead so DecodeArgs's own
+			// trailing-content check fails the call loudly (see looksConcatenated).
+			args = json.RawMessage(raw)
+		} else {
+			args = json.RawMessage(healToolArguments(raw))
+		}
 		emit(Event{Kind: EventToolUse, Name: name, Input: validJSON(args)})
 
 		res := reg.Call(ctx, sess.UserID, name, args)

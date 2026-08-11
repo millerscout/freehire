@@ -119,27 +119,37 @@ DELETE FROM experience_atoms
 WHERE id = $1 AND user_id = $2;
 
 -- name: MergeExperienceAtoms :one
--- Atomically delete the loser and update the keep. The DELETE RETURNING CTE is the
--- transaction: the UPDATE only lands when the delete did, so a missing/foreign loser
--- yields no row (caller maps to not found) rather than a half-applied merge. Claim,
+-- Atomically update the keep and delete the loser. The UPDATE is the transaction: the
+-- DELETE only lands when the update did, so a keep that vanished between Store.MergeAtoms'
+-- ownership check and this call (a concurrent delete/merge) yields no row and deletes
+-- nothing, rather than deleting the loser out from under a merge whose other half never
+-- landed. The UPDATE itself is gated on the loser still existing, for the same reason in
+-- the other direction. Either both sides of the merge happen or neither does. Claim,
 -- claim_key, employment_id and source_ref stay on the keep — only richness fields move.
-WITH deleted AS (
+WITH updated AS (
+    UPDATE experience_atoms
+    SET context = @context,
+        metrics = @metrics,
+        skills = @skills,
+        provenance = @provenance,
+        updated_at = now()
+    WHERE experience_atoms.id = @keep_id AND experience_atoms.user_id = @user_id
+      AND EXISTS (
+          SELECT 1 FROM experience_atoms AS loser
+          WHERE loser.id = @loser_id AND loser.user_id = @user_id
+      )
+    RETURNING experience_atoms.id, experience_atoms.user_id, experience_atoms.employment_id,
+              experience_atoms.claim, experience_atoms.claim_key, experience_atoms.context,
+              experience_atoms.metrics, experience_atoms.skills, experience_atoms.provenance,
+              experience_atoms.source_ref, experience_atoms.created_at, experience_atoms.updated_at
+),
+deleted AS (
     DELETE FROM experience_atoms
     WHERE experience_atoms.id = @loser_id AND experience_atoms.user_id = @user_id
+      AND EXISTS (SELECT 1 FROM updated)
     RETURNING experience_atoms.id
 )
-UPDATE experience_atoms
-SET context = @context,
-    metrics = @metrics,
-    skills = @skills,
-    provenance = @provenance,
-    updated_at = now()
-WHERE experience_atoms.id = @keep_id AND experience_atoms.user_id = @user_id
-  AND EXISTS (SELECT 1 FROM deleted)
-RETURNING experience_atoms.id, experience_atoms.user_id, experience_atoms.employment_id,
-          experience_atoms.claim, experience_atoms.claim_key, experience_atoms.context,
-          experience_atoms.metrics, experience_atoms.skills, experience_atoms.provenance,
-          experience_atoms.source_ref, experience_atoms.created_at, experience_atoms.updated_at;
+SELECT * FROM updated;
 
 -- name: ListExperienceBackfillTargets :many
 -- Every user with a stored CV, carrying their structured résumé ONLY when its stamp still

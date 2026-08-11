@@ -88,9 +88,9 @@ func newFakeRepo() *fakeRepo {
 // since-superseded upload time matches no row and is dropped whole — structure AND
 // geography. The fake used to write unconditionally, which meant no Store-level test
 // could ever observe that the two travel together.
-func (r *fakeRepo) SetStructured(_ context.Context, w StructuredWrite) error {
+func (r *fakeRepo) SetStructured(_ context.Context, w StructuredWrite) (bool, error) {
 	if cur, ok := r.uploadedAt[w.UserID]; !ok || !cur.Valid || !cur.Time.Equal(w.UploadedAt) {
-		return nil
+		return false, nil
 	}
 	r.structured[w.UserID] = w.Blob
 	r.structMod[w.UserID] = w.Model
@@ -99,7 +99,7 @@ func (r *fakeRepo) SetStructured(_ context.Context, w StructuredWrite) error {
 	r.extractSt[w.UserID] = ExtractStatusOK
 	r.extractDet[w.UserID] = ""
 	r.extractFor[w.UserID] = pgtype.Timestamptz{Time: w.UploadedAt, Valid: true}
-	return nil
+	return true, nil
 }
 
 func (r *fakeRepo) GetStructured(_ context.Context, userID int64) (db.GetUserResumeStructuredRow, error) {

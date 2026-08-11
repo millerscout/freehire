@@ -479,23 +479,30 @@ func (q *Queries) ListExperienceEmployments(ctx context.Context, userID int64) (
 }
 
 const mergeExperienceAtoms = `-- name: MergeExperienceAtoms :one
-WITH deleted AS (
+WITH updated AS (
+    UPDATE experience_atoms
+    SET context = $1,
+        metrics = $2,
+        skills = $3,
+        provenance = $4,
+        updated_at = now()
+    WHERE experience_atoms.id = $5 AND experience_atoms.user_id = $6
+      AND EXISTS (
+          SELECT 1 FROM experience_atoms AS loser
+          WHERE loser.id = $7 AND loser.user_id = $6
+      )
+    RETURNING experience_atoms.id, experience_atoms.user_id, experience_atoms.employment_id,
+              experience_atoms.claim, experience_atoms.claim_key, experience_atoms.context,
+              experience_atoms.metrics, experience_atoms.skills, experience_atoms.provenance,
+              experience_atoms.source_ref, experience_atoms.created_at, experience_atoms.updated_at
+),
+deleted AS (
     DELETE FROM experience_atoms
     WHERE experience_atoms.id = $7 AND experience_atoms.user_id = $6
+      AND EXISTS (SELECT 1 FROM updated)
     RETURNING experience_atoms.id
 )
-UPDATE experience_atoms
-SET context = $1,
-    metrics = $2,
-    skills = $3,
-    provenance = $4,
-    updated_at = now()
-WHERE experience_atoms.id = $5 AND experience_atoms.user_id = $6
-  AND EXISTS (SELECT 1 FROM deleted)
-RETURNING experience_atoms.id, experience_atoms.user_id, experience_atoms.employment_id,
-          experience_atoms.claim, experience_atoms.claim_key, experience_atoms.context,
-          experience_atoms.metrics, experience_atoms.skills, experience_atoms.provenance,
-          experience_atoms.source_ref, experience_atoms.created_at, experience_atoms.updated_at
+SELECT id, user_id, employment_id, claim, claim_key, context, metrics, skills, provenance, source_ref, created_at, updated_at FROM updated
 `
 
 type MergeExperienceAtomsParams struct {
@@ -508,11 +515,29 @@ type MergeExperienceAtomsParams struct {
 	LoserID    uuid.UUID `json:"loser_id"`
 }
 
-// Atomically delete the loser and update the keep. The DELETE RETURNING CTE is the
-// transaction: the UPDATE only lands when the delete did, so a missing/foreign loser
-// yields no row (caller maps to not found) rather than a half-applied merge. Claim,
+type MergeExperienceAtomsRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	UserID       int64              `json:"user_id"`
+	EmploymentID pgtype.UUID        `json:"employment_id"`
+	Claim        string             `json:"claim"`
+	ClaimKey     string             `json:"claim_key"`
+	Context      string             `json:"context"`
+	Metrics      []string           `json:"metrics"`
+	Skills       []string           `json:"skills"`
+	Provenance   string             `json:"provenance"`
+	SourceRef    string             `json:"source_ref"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Atomically update the keep and delete the loser. The UPDATE is the transaction: the
+// DELETE only lands when the update did, so a keep that vanished between Store.MergeAtoms'
+// ownership check and this call (a concurrent delete/merge) yields no row and deletes
+// nothing, rather than deleting the loser out from under a merge whose other half never
+// landed. The UPDATE itself is gated on the loser still existing, for the same reason in
+// the other direction. Either both sides of the merge happen or neither does. Claim,
 // claim_key, employment_id and source_ref stay on the keep — only richness fields move.
-func (q *Queries) MergeExperienceAtoms(ctx context.Context, arg MergeExperienceAtomsParams) (ExperienceAtom, error) {
+func (q *Queries) MergeExperienceAtoms(ctx context.Context, arg MergeExperienceAtomsParams) (MergeExperienceAtomsRow, error) {
 	row := q.db.QueryRow(ctx, mergeExperienceAtoms,
 		arg.Context,
 		arg.Metrics,
@@ -522,7 +547,7 @@ func (q *Queries) MergeExperienceAtoms(ctx context.Context, arg MergeExperienceA
 		arg.UserID,
 		arg.LoserID,
 	)
-	var i ExperienceAtom
+	var i MergeExperienceAtomsRow
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,

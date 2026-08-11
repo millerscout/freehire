@@ -57,14 +57,18 @@ func richnessScore(a Atom) int {
 
 // unionForMerge builds the kept atom's post-merge fields. Claim, employment,
 // and source_ref stay on keep. Context is the longer non-empty string; metrics
-// and skills are unioned (keep first) then Sanitized; provenance becomes
-// publishable if either side is.
+// and skills are unioned (keep first) then Sanitized.
+//
+// Provenance stays keep's own — never lose's, even when lose is publishable and keep is
+// not. The merged Claim is keep.Claim verbatim: if that text was never candidate-asserted,
+// tagging the merge as publishable because the DISCARDED atom happened to be would let an
+// agent-inferred, unconfirmed claim reach the CV evidence gate as if the candidate had said
+// it (see internal/handler/AGENTS.md — the provenance check lives here, not in a prompt).
 func unionForMerge(keep, lose Atom) Atom {
 	out := keep
 	out.Context = richerContext(keep.Context, lose.Context)
 	out.Metrics = unionStrings(keep.Metrics, lose.Metrics)
 	out.Skills = unionStrings(keep.Skills, lose.Skills)
-	out.Provenance = mergeProvenance(keep.Provenance, lose.Provenance)
 	out.Sanitize()
 	return out
 }
@@ -96,16 +100,6 @@ func unionStrings(keep, lose []string) []string {
 		out = append(out, s)
 	}
 	return out
-}
-
-func mergeProvenance(keep, lose Provenance) Provenance {
-	if keep.Publishable() {
-		return keep
-	}
-	if lose.Publishable() {
-		return lose
-	}
-	return ProvenanceAgentInferred
 }
 
 // sameEmploymentBucket reports whether two atoms may be merged: both unplaced

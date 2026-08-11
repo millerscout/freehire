@@ -21,8 +21,8 @@ func TestSeedHistoryFromBankSplitsJobsAndProjects(t *testing.T) {
 
 	got := seedHistoryFromBank(employments, atoms)
 
-	if !got.HasEmployments || !got.HasProjectEmployments {
-		t.Fatalf("flags = employments:%v projects:%v, want both true", got.HasEmployments, got.HasProjectEmployments)
+	if !got.HasJobEmployments || !got.HasProjectEmployments {
+		t.Fatalf("flags = jobs:%v projects:%v, want both true", got.HasJobEmployments, got.HasProjectEmployments)
 	}
 	if len(got.Experience) != 1 || got.Experience[0].Company != "RingCentral" {
 		t.Errorf("experience = %+v, want the job only", got.Experience)
@@ -48,8 +48,8 @@ func TestSeedHistoryFromBankJobsOnly(t *testing.T) {
 		[]Employment{{ID: jobID, Kind: KindJob, Company: "Acme", Role: "Dev"}},
 		nil,
 	)
-	if !got.HasEmployments || got.HasProjectEmployments {
-		t.Errorf("flags = %+v, want employments without projects", got)
+	if !got.HasJobEmployments || got.HasProjectEmployments {
+		t.Errorf("flags = %+v, want jobs without projects", got)
 	}
 	if len(got.Projects) != 0 {
 		t.Errorf("projects = %+v, want none", got.Projects)
@@ -58,11 +58,45 @@ func TestSeedHistoryFromBankJobsOnly(t *testing.T) {
 
 func TestSeedHistoryFromBankEmpty(t *testing.T) {
 	got := seedHistoryFromBank(nil, nil)
-	if got.HasEmployments || got.HasProjectEmployments {
+	if got.HasJobEmployments || got.HasProjectEmployments {
 		t.Errorf("empty bank flags = %+v", got)
 	}
 	if len(got.Experience) != 0 || len(got.Projects) != 0 {
 		t.Errorf("empty bank rows = %+v", got)
+	}
+}
+
+// The regression this PR shipped with: a bank holding ONLY a project-kind row must not be
+// read as "has job history" — HasJobEmployments must stay false so the seeder falls back
+// to the structure's own Experience instead of blanking it. See cv_seed.go.
+func TestSeedHistoryFromBankProjectsOnlyLeavesJobEmploymentsFalse(t *testing.T) {
+	id := uuid.New()
+	got := seedHistoryFromBank(
+		[]Employment{{ID: id, Kind: KindProject, Company: "opensched", Link: "https://opensched.dev"}},
+		[]Atom{{EmploymentID: &id, Claim: "shipped a feature", Provenance: ProvenanceStatedInChat}},
+	)
+	if got.HasJobEmployments {
+		t.Errorf("flags = %+v, want HasJobEmployments false for a projects-only bank", got)
+	}
+	if !got.HasProjectEmployments {
+		t.Errorf("flags = %+v, want HasProjectEmployments true", got)
+	}
+	if len(got.Experience) != 0 {
+		t.Errorf("experience = %+v, want none — the project's highlight belongs to Projects, not Experience", got.Experience)
+	}
+}
+
+// Confirmed evidence with no place still lands in Experience (as a blank-header entry),
+// even when the bank holds no employment rows at all — HasJobEmployments must reflect that.
+func TestSeedHistoryFromBankPlacelessOnlySetsHasJobEmployments(t *testing.T) {
+	got := seedHistoryFromBank(nil, []Atom{
+		{Claim: "shipped a feature nobody wrote down", Provenance: ProvenanceStatedInChat},
+	})
+	if !got.HasJobEmployments {
+		t.Errorf("flags = %+v, want HasJobEmployments true — placeless evidence is still Experience content", got)
+	}
+	if len(got.Experience) != 1 || len(got.Experience[0].Highlights) != 1 {
+		t.Errorf("experience = %+v, want one placeless entry", got.Experience)
 	}
 }
 

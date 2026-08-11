@@ -207,7 +207,7 @@ SELECT resume_structured, resume_structured_model, resume_structured_uploaded_at
 FROM users
 WHERE id = $1;
 
--- name: SetUserResumeStructured :exec
+-- name: SetUserResumeStructured :execrows
 -- Persist the user's derived structured résumé, stamped with the producing LLM model
 -- and the résumé upload time it was derived from (passed in, not now(), so the stamp
 -- matches the CV the background extraction actually read). Never the raw CV text.

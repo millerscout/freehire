@@ -30,7 +30,14 @@
   let empLink = $state('');
   let empStart = $state('');
   let empEnd = $state('');
+  // Deliberately separate from empName/empLink/empStart/empEnd above: "Add project" and
+  // "Edit employment" are independently toggleable, and sharing state between them let
+  // opening one silently blank or overwrite the other's still-open, unsaved form.
   let addingProject = $state(false);
+  let projName = $state('');
+  let projLink = $state('');
+  let projStart = $state('');
+  let projEnd = $state('');
   /** Unplaced achievement being promoted into a new project employment. */
   let promotingAtomId = $state<string | null>(null);
   let promoteName = $state('');
@@ -180,21 +187,21 @@
   }
 
   async function createProject() {
-    if (busy || !empName.trim()) return;
+    if (busy || !projName.trim()) return;
     busy = true;
     try {
       await api.createExperienceEmployment({
         kind: 'project',
-        name: empName.trim(),
-        link: empLink.trim() || undefined,
-        start: empStart.trim() || undefined,
-        end: empEnd.trim() || undefined,
+        name: projName.trim(),
+        link: projLink.trim() || undefined,
+        start: projStart.trim() || undefined,
+        end: projEnd.trim() || undefined,
       });
       addingProject = false;
-      empName = '';
-      empLink = '';
-      empStart = '';
-      empEnd = '';
+      projName = '';
+      projLink = '';
+      projStart = '';
+      projEnd = '';
       await load();
     } catch (e) {
       error = e instanceof Error ? e.message : 'Could not create project.';
@@ -381,10 +388,10 @@
               disabled={busy}
               onclick={() => {
                 addingProject = true;
-                empName = '';
-                empLink = '';
-                empStart = '';
-                empEnd = '';
+                projName = '';
+                projLink = '';
+                projStart = '';
+                projEnd = '';
               }}
             >
               Add project
@@ -396,14 +403,14 @@
         {#if addingProject}
           <div class="flex flex-col gap-2 rounded-lg border border-border p-3">
             <p class="text-sm font-medium">New project</p>
-            <input class="rounded-md border border-border bg-background px-3 py-2 text-sm" bind:value={empName} placeholder="Name" />
-            <input class="rounded-md border border-border bg-background px-3 py-2 text-sm" bind:value={empLink} placeholder="https://…" />
+            <input class="rounded-md border border-border bg-background px-3 py-2 text-sm" bind:value={projName} placeholder="Name" />
+            <input class="rounded-md border border-border bg-background px-3 py-2 text-sm" bind:value={projLink} placeholder="https://…" />
             <div class="flex gap-2">
-              <input class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" bind:value={empStart} placeholder="Start" />
-              <input class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" bind:value={empEnd} placeholder="End" />
+              <input class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" bind:value={projStart} placeholder="Start" />
+              <input class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" bind:value={projEnd} placeholder="End" />
             </div>
             <div class="flex gap-2">
-              <Button size="sm" disabled={busy || !empName.trim()} onclick={createProject}>Save</Button>
+              <Button size="sm" disabled={busy || !projName.trim()} onclick={createProject}>Save</Button>
               <Button size="sm" variant="ghost" onclick={() => (addingProject = false)}>Cancel</Button>
             </div>
           </div>

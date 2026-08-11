@@ -52,6 +52,37 @@ func TestSetStructuredFillsEmptyContactsOnly(t *testing.T) {
 	}
 }
 
+// A slow/late extraction for a since-superseded upload must not leak into candidate-owned
+// contacts. repo.SetStructured's monotonic stamp guard already drops the structured/
+// geography write when the stamp is stale; Store.SetStructured must skip the contacts
+// fill in that same case rather than filling from data the write itself discarded.
+func TestSetStructuredWithStaleStampDoesNotFillContacts(t *testing.T) {
+	repo := newFakeRepo()
+	s := New(nil, repo)
+	ctx := context.Background()
+
+	t1 := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	t2 := t1.Add(time.Hour)
+	// A newer upload (t2) has already replaced the CV extraction A was derived from (t1).
+	repo.uploadedAt[7] = pgtype.Timestamptz{Time: t2, Valid: true}
+
+	stale := resumeextract.Structured{FullName: "Old Name", Phone: "111-111-1111"}
+	if err := s.SetStructured(ctx, 7, stale, "model-x", t1); err != nil {
+		t.Fatalf("SetStructured: %v", err)
+	}
+
+	if len(repo.structured[7]) != 0 {
+		t.Fatalf("structured blob = %q, want the guard to have dropped the write", repo.structured[7])
+	}
+	got, err := s.CandidateContacts(ctx, 7)
+	if err != nil {
+		t.Fatalf("CandidateContacts: %v", err)
+	}
+	if !got.Empty() {
+		t.Fatalf("contacts = %+v, want empty — a dropped stale write must not leak into owned contacts", got)
+	}
+}
+
 func TestClearKeepsCandidateContacts(t *testing.T) {
 	repo := newFakeRepo()
 	blobs := &fakeBlobs{objs: map[string][]byte{}}

@@ -332,6 +332,44 @@ func TestAMalformedToolCallIsCorrectableInTheSameTurn(t *testing.T) {
 	}
 }
 
+// A provider that concatenates two complete JSON payloads for one tool call (the same
+// malformation class healToolArguments exists to patch around, but a SECOND full value
+// rather than trailer junk) must not have the call silently execute with only the first
+// payload — that would run the model's edit half-applied while reporting success.
+// Regression for a bug where healToolArguments' "keep the first value" storage/replay
+// fallback was also feeding tool EXECUTION, so DecodeArgs' own trailing-content guard
+// never got to see the raw string.
+func TestAConcatenatedToolCallFailsInsteadOfRunningTruncated(t *testing.T) {
+	m := &scriptedModel{replies: []*llms.ContentChoice{
+		callReply("echo", `{"text":"first"}{"text":"second"}`),
+		callReply("echo", `{"text":"fixed"}`),
+		textReply("Done."),
+	}}
+	q := &fakeQueries{}
+	r := testRunner(m, q)
+
+	events, err := collect(t, r, Session{ID: sessionID, UserID: 3}, NewRegistry(echoTool()), "go")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var firstResult Event
+	for _, e := range events {
+		if e.Kind == EventToolResult {
+			firstResult = e
+			break
+		}
+	}
+	if !firstResult.IsError {
+		t.Fatalf("first tool result = %+v, want it marked as failed rather than run on the first half", firstResult)
+	}
+	if strings.Contains(firstResult.Result, "echoed") {
+		t.Fatalf("result = %s, want no echoed payload — the call must not have executed", firstResult.Result)
+	}
+	if res := lastResult(t, events); res.IsError {
+		t.Errorf("the turn should still end cleanly after the model corrected itself: %+v", res)
+	}
+}
+
 func TestAFailingToolDoesNotAbortTheTurn(t *testing.T) {
 	boom := Tool{
 		Name:   "boom",

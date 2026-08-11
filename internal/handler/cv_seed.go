@@ -58,27 +58,31 @@ func (s bankedSeeder) Structured(ctx context.Context, userID int64) (resumeextra
 	structureExperience := st.Experience
 	structureProjects := st.Projects
 
-	// Prefer the bank for experience and projects once it holds rows. An empty or
-	// unreadable bank falls back to the structure so a pending import does not blank
-	// roles the extract already has. Structure experience is never merged into a
-	// populated bank — that would resurrect roles the user deleted.
+	// Prefer the bank for experience and projects once it holds rows of that kind. An
+	// empty or unreadable bank falls back to the structure so a pending import does not
+	// blank roles the extract already has. Structure experience is never merged into a
+	// populated bank — that would resurrect roles the user deleted. The two kinds are
+	// judged independently: a bank holding only project-kind rows must still fall back
+	// to the structure's own Experience, not blank it.
 	st.Experience = nil
+	st.Projects = nil
 	if s.bank != nil {
 		hist, err := s.bank.SeedHistory(ctx, userID)
 		if err != nil {
 			log.Printf("cv seed work history: user %d: %v", userID, err)
 			st.Experience = structureExperience
 			st.Projects = structureProjects
-		} else if hist.HasEmployments {
-			st.Experience = hist.Experience
+		} else {
+			if hist.HasJobEmployments {
+				st.Experience = hist.Experience
+			} else {
+				st.Experience = structureExperience
+			}
 			if hist.HasProjectEmployments {
 				st.Projects = hist.Projects
 			} else {
 				st.Projects = structureProjects
 			}
-		} else {
-			st.Experience = structureExperience
-			st.Projects = structureProjects
 		}
 	} else {
 		st.Experience = structureExperience

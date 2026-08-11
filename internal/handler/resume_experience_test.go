@@ -39,7 +39,7 @@ func (f *fakeBank) SeedHistory(context.Context, int64) (experience.SeedHistory, 
 	return experience.SeedHistory{
 		Experience:            f.history,
 		Projects:              f.projects,
-		HasEmployments:        len(f.history) > 0 || len(f.projects) > 0,
+		HasJobEmployments:     len(f.history) > 0,
 		HasProjectEmployments: len(f.projects) > 0,
 	}, nil
 }

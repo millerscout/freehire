@@ -196,6 +196,13 @@ func collapseSpace(s string) string {
 // Otherwise it carves out the first object/array (Haiku has been seen appending
 // "\n</invoke>" and similar XML trailer after a complete object) or falls back
 // to "{}" so Bedrock's converter never sees illegal tool-call arguments.
+//
+// This is a storage/replay concern only — it always keeps the first value, even when
+// what follows is itself a second, complete JSON value (the model concatenated two
+// calls) rather than trailer junk. That trade-off is fine for what gets persisted and
+// replayed to the model on a later turn, but it must never be what decides what a tool
+// actually EXECUTES with: see looksConcatenated, which runToolCalls checks first so a
+// concatenated call fails loudly via DecodeArgs instead of silently running truncated.
 func healToolArguments(args string) string {
 	s := strings.TrimSpace(args)
 	if s == "" {
@@ -214,4 +221,29 @@ func healToolArguments(args string) string {
 		return "{}"
 	}
 	return string(raw)
+}
+
+// looksConcatenated reports whether args is more than one complete JSON value run
+// together with no separator — e.g. two full tool-call payloads — as opposed to a
+// single value followed by non-JSON trailer junk. The two must be told apart:
+// healToolArguments keeps only the first value either way (see above), but a genuine
+// concatenation means the model intended a SECOND call the caller must not silently
+// drop by executing just the first.
+func looksConcatenated(args string) bool {
+	s := strings.TrimSpace(args)
+	if s == "" || json.Valid([]byte(s)) {
+		return false
+	}
+	start := strings.IndexAny(s, "{[")
+	if start < 0 {
+		return false
+	}
+	body := s[start:]
+	dec := json.NewDecoder(strings.NewReader(body))
+	var raw json.RawMessage
+	if err := dec.Decode(&raw); err != nil {
+		return false
+	}
+	rest := strings.TrimSpace(body[dec.InputOffset():])
+	return rest != "" && json.Valid([]byte(rest))
 }

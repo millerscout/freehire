@@ -862,7 +862,7 @@ func (q *Queries) SetUserResumeGeography(ctx context.Context, arg SetUserResumeG
 	return err
 }
 
-const setUserResumeStructured = `-- name: SetUserResumeStructured :exec
+const setUserResumeStructured = `-- name: SetUserResumeStructured :execrows
 UPDATE users
 SET resume_structured = $2, resume_structured_model = $3, resume_structured_uploaded_at = $4,
     resume_countries = $5, resume_regions = $6, resume_cities = $7,
@@ -894,8 +894,8 @@ type SetUserResumeStructuredParams struct {
 // nothing to gain by deferring it — and a separate write would have to duplicate the
 // guard, which is exactly how invariants drift apart.
 // On success, extract status is marked ok for this upload stamp.
-func (q *Queries) SetUserResumeStructured(ctx context.Context, arg SetUserResumeStructuredParams) error {
-	_, err := q.db.Exec(ctx, setUserResumeStructured,
+func (q *Queries) SetUserResumeStructured(ctx context.Context, arg SetUserResumeStructuredParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setUserResumeStructured,
 		arg.ID,
 		arg.ResumeStructured,
 		arg.ResumeStructuredModel,
@@ -904,7 +904,10 @@ func (q *Queries) SetUserResumeStructured(ctx context.Context, arg SetUserResume
 		arg.ResumeRegions,
 		arg.ResumeCities,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const userEmail = `-- name: UserEmail :one
