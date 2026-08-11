@@ -47,6 +47,7 @@ func TestIdentityTableReaders(t *testing.T) {
 
 	cases := []struct {
 		name   string
+		owned  bool // whether candidate-owned contacts are set for this case
 		setup  func(*fakeRepo)
 		expect want
 	}{
@@ -77,7 +78,8 @@ func TestIdentityTableReaders(t *testing.T) {
 			},
 		},
 		{
-			name: "current stamp, owned overlay",
+			name:  "current stamp, owned overlay",
+			owned: true,
 			setup: func(r *fakeRepo) {
 				r.uploadedAt[7] = pgtype.Timestamptz{Time: tNew, Valid: true}
 				r.structured[7] = blob
@@ -90,7 +92,8 @@ func TestIdentityTableReaders(t *testing.T) {
 			},
 		},
 		{
-			name: "pending superseded blob, owned overlay",
+			name:  "pending superseded blob, owned overlay",
+			owned: true,
 			setup: func(r *fakeRepo) {
 				r.uploadedAt[7] = pgtype.Timestamptz{Time: tNew, Valid: true}
 				r.structured[7] = blob
@@ -104,6 +107,7 @@ func TestIdentityTableReaders(t *testing.T) {
 		},
 		{
 			name:  "résumé deleted, owned contacts remain",
+			owned: true,
 			setup: func(r *fakeRepo) {},
 			expect: want{
 				seedOK: true, seedName: "Ada Lovelace",
@@ -116,17 +120,12 @@ func TestIdentityTableReaders(t *testing.T) {
 			repo := newFakeRepo()
 			s := New(nil, repo)
 			ctx := context.Background()
-			if _, err := s.SetCandidateContacts(ctx, 7, owned); err != nil {
-				t.Fatal(err)
+			if tc.owned {
+				if _, err := s.SetCandidateContacts(ctx, 7, owned); err != nil {
+					t.Fatal(err)
+				}
 			}
-			if tc.name == "current stamp, no owned" || tc.name == "pending superseded blob, no owned" {
-				repo.contacts[7] = nil
-			}
-			if tc.name == "résumé deleted, owned contacts remain" {
-				// owned already set; no upload
-			} else {
-				tc.setup(repo)
-			}
+			tc.setup(repo)
 
 			st, ok, err := s.Structured(ctx, 7)
 			if err != nil {

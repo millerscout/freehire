@@ -92,10 +92,8 @@ func (h *cvHandlers) TailorCV(c *fiber.Ctx) error {
 	// Existing vacancy-bound copies (and a base left empty before provisional contacts
 	// were usable) heal empty header fields on bootstrap the same way GetCV does.
 	if trec, gerr := h.cvStore.Get(c.Context(), tailored.ID, userID); gerr == nil {
-		if healed, herr := h.healRecordHeader(c.Context(), userID, trec); herr != nil {
+		if _, herr := h.healRecordHeader(c.Context(), userID, trec); herr != nil {
 			log.Printf("cv: healing tailored header on tailor %s: %v", tailored.ID, herr)
-		} else {
-			_ = healed
 		}
 	}
 	h.healBaseHeaderIfNeeded(c.Context(), userID)

@@ -442,16 +442,16 @@ func TestAReadAchievementLooksLikeASearchedOne(t *testing.T) {
 		t.Fatalf("want one achievement from each: search %v, read %v", fromSearch.Evidence, fromRead.Achievements)
 	}
 	if !maps.Equal(
-		fieldTypes(fromSearch.Evidence[0]),
-		fieldTypes(fromRead.Achievements[0]),
+		fieldNames(fromSearch.Evidence[0]),
+		fieldNames(fromRead.Achievements[0]),
 	) {
 		t.Errorf("the same achievement carries different fields depending on how it was fetched:\nsearch %v\nread   %v",
 			fromSearch.Evidence[0], fromRead.Achievements[0])
 	}
 }
 
-// fieldTypes reduces an entry to its field names, so the comparison is about shape.
-func fieldTypes(entry map[string]any) map[string]bool {
+// fieldNames reduces an entry to its field names, so the comparison is about shape.
+func fieldNames(entry map[string]any) map[string]bool {
 	out := make(map[string]bool, len(entry))
 	for k := range entry {
 		out[k] = true

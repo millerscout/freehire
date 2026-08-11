@@ -559,7 +559,7 @@ describe('extractForm grouping', () => {
     fillByLabel(document, [{ label: emailField.label, value: 'ilya@example.com' }]);
 
     expect(email.value).toBe('ilya@example.com');
-    expect(germany!.checked).toBe(false);
+    expect(germany.checked).toBe(false);
   });
 });
 
@@ -573,8 +573,8 @@ describe('fillByLabel on a group', () => {
 
     const outcomes = fillByLabel(document, [{ label: 'Which countries?', value: 'Poland' }]);
 
-    expect(poland!.checked).toBe(true);
-    expect(germany!.checked).toBe(false);
+    expect(poland.checked).toBe(true);
+    expect(germany.checked).toBe(false);
     expect(outcomes).toEqual([{ label: 'Which countries?', status: 'filled' }]);
   });
 
@@ -586,7 +586,7 @@ describe('fillByLabel on a group', () => {
 
     const outcomes = fillByLabel(document, [{ label: 'Which countries?', value: 'Germany, Spain' }]);
 
-    expect([germany!.checked, poland!.checked, spain!.checked]).toEqual([true, false, true]);
+    expect([germany.checked, poland.checked, spain.checked]).toEqual([true, false, true]);
     expect(outcomes).toEqual([{ label: 'Which countries?', status: 'filled' }]);
   });
 
@@ -597,7 +597,7 @@ describe('fillByLabel on a group', () => {
 
     fillByLabel(document, [{ label: 'Which countries?', value: 'Korea, Republic of' }]);
 
-    expect(korea!.checked).toBe(true);
+    expect(korea.checked).toBe(true);
   });
 
   it('round-trips a value whose options contain commas of their own', () => {

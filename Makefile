@@ -10,6 +10,8 @@ COVERAGE_DIR ?= coverage
 COVER_UNIT ?= $(COVERAGE_DIR)/unit.out
 COVER_INTEGRATION ?= $(COVERAGE_DIR)/integration.out
 
+SQLC_VERSION ?= 1.31.1
+
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
@@ -24,8 +26,6 @@ build: ## Build the binary
 
 tidy: ## Tidy up dependencies
 	go mod tidy
-
-SQLC_VERSION ?= 1.31.1
 
 sqlc: ## Generate code from SQL (via Docker/Podman, no local sqlc needed)
 	$(DOCKER) run --rm -v "$(PWD):/src" -w /src docker.io/sqlc/sqlc:$(SQLC_VERSION) generate

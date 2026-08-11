@@ -423,8 +423,8 @@ func (h *resumeHandlers) GetResume(c *fiber.Ctx) error {
 	if owned, err := h.resume.CandidateContacts(c.Context(), userID); err != nil {
 		log.Printf("resume contacts: user %d: %v", userID, err)
 	} else if !owned.Empty() {
-		c := owned
-		resp.Contacts = &c
+		contacts := owned
+		resp.Contacts = &contacts
 	}
 
 	var st resumeextract.Structured
@@ -434,14 +434,10 @@ func (h *resumeHandlers) GetResume(c *fiber.Ctx) error {
 		if pr.Pending {
 			resp.StructurePending = true
 		}
+		// pr.Structure already carries only identity fields when !pr.Current (see
+		// ProfileReadForUser / provisionalContacts) — nothing further to strip here.
 		st = pr.Structure
 		st.Experience = nil
-		if !pr.Current {
-			st = resumeextract.Structured{
-				FullName: st.FullName, Email: st.Email, Phone: st.Phone,
-				Location: st.Location, Links: st.Links,
-			}
-		}
 		// Prefer owned contacts on the composed structured view for Profile.
 		if resp.Contacts != nil {
 			st.FullName = resp.Contacts.FullName

@@ -455,7 +455,6 @@
     for (const candidate of sessions) {
       // Sequential on purpose: we want the FIRST one that opens, and opening them in
       // parallel would race several transcripts into the same pane.
-       
       await openSession(candidate.id);
       if (!notFound) return true;
       notFound = false;

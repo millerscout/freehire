@@ -132,16 +132,15 @@ func (b *stubBank) MergeAtoms(_ context.Context, userID int64, aID, bID uuid.UUI
 		return experience.Atom{}, experience.ErrMergeCrossEmployment
 	}
 	// Prefer the richer side as keep — mirrors Store keep-selection enough for HTTP tests.
+	richness := func(a experience.Atom) int {
+		n := len(a.Metrics) + len(a.Skills)
+		if strings.TrimSpace(a.Context) != "" {
+			n++
+		}
+		return n
+	}
 	keep, lose := a, other
-	keepScore := len(keep.Metrics) + len(keep.Skills)
-	if strings.TrimSpace(keep.Context) != "" {
-		keepScore++
-	}
-	loseScore := len(lose.Metrics) + len(lose.Skills)
-	if strings.TrimSpace(lose.Context) != "" {
-		loseScore++
-	}
-	if loseScore > keepScore {
+	if richness(other) > richness(a) {
 		keep, lose = other, a
 	}
 	if strings.TrimSpace(keep.Context) == "" {

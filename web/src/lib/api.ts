@@ -1002,11 +1002,10 @@ export function createApi(
 
   /** Fold two achievements into one richer keep. Cookie-only — merge deletes the other. */
   async function mergeExperienceAtoms(ids: [string, string]): Promise<ExperienceAtom> {
-    return requestData<ExperienceAtom>('/api/v1/me/experience/atoms/merge', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids }),
-    });
+    return requestData<ExperienceAtom>(
+      '/api/v1/me/experience/atoms/merge',
+      jsonBody('POST', { ids }),
+    );
   }
 
   /** Remove one achievement. This is the only path that takes evidence out of the bank. */
@@ -1023,11 +1022,10 @@ export function createApi(
   async function createExperienceEmployment(
     body: Partial<ExperienceEmployment> & { kind: 'job' | 'project' },
   ): Promise<ExperienceEmployment> {
-    return requestData<ExperienceEmployment>('/api/v1/me/experience/employments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    return requestData<ExperienceEmployment>(
+      '/api/v1/me/experience/employments',
+      jsonBody('POST', body),
+    );
   }
 
   /** Update employment metadata (name/company, link, dates). Cookie-only. */
@@ -1037,11 +1035,7 @@ export function createApi(
   ): Promise<ExperienceEmployment> {
     return requestData<ExperienceEmployment>(
       `/api/v1/me/experience/employments/${encodeURIComponent(id)}`,
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      },
+      jsonBody('PUT', body),
     );
   }
 
@@ -1162,11 +1156,7 @@ export function createApi(
 
   /** Replace candidate-owned contacts without re-uploading a CV. */
   async function putResumeContacts(contacts: CandidateContacts): Promise<CandidateContacts> {
-    return requestData<CandidateContacts>('/api/v1/me/resume/contacts', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(contacts),
-    });
+    return requestData<CandidateContacts>('/api/v1/me/resume/contacts', jsonBody('PUT', contacts));
   }
 
   /** Overwrite owned contacts from the current structured extract. */

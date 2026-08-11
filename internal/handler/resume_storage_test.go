@@ -457,7 +457,7 @@ func (r *fakeResumeRepo) ExtractStatus() string {
 func (r *fakeResumeRepo) SetExtractFailed(_ context.Context, _ int64, detail string, uploadedAt time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.extractStatus, r.extractDetail = "failed", detail
+	r.extractStatus, r.extractDetail = resume.ExtractStatusFailed, detail
 	r.extractFor = pgtype.Timestamptz{Time: uploadedAt, Valid: true}
 	return nil
 }
@@ -465,7 +465,7 @@ func (r *fakeResumeRepo) SetExtractFailed(_ context.Context, _ int64, detail str
 func (r *fakeResumeRepo) SetExtractPending(_ context.Context, _ int64, uploadedAt time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.extractStatus, r.extractDetail = "pending", ""
+	r.extractStatus, r.extractDetail = resume.ExtractStatusPending, ""
 	r.extractFor = pgtype.Timestamptz{Time: uploadedAt, Valid: true}
 	return nil
 }

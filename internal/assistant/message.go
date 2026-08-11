@@ -192,6 +192,23 @@ func collapseSpace(s string) string {
 	return strings.ToLower(strings.Join(strings.Fields(s), " "))
 }
 
+// firstJSONValue decodes the first complete JSON value in s, skipping any leading
+// non-JSON text up to the first "{" or "[", and returns it along with whatever
+// text still follows. ok is false when no valid JSON value could be decoded.
+func firstJSONValue(s string) (value, rest string, ok bool) {
+	start := strings.IndexAny(s, "{[")
+	if start < 0 {
+		return "", "", false
+	}
+	body := s[start:]
+	dec := json.NewDecoder(strings.NewReader(body))
+	var raw json.RawMessage
+	if err := dec.Decode(&raw); err != nil {
+		return "", "", false
+	}
+	return string(raw), body[dec.InputOffset():], true
+}
+
 // healToolArguments returns args unchanged when they are already one JSON value.
 // Otherwise it carves out the first object/array (Haiku has been seen appending
 // "\n</invoke>" and similar XML trailer after a complete object) or falls back
@@ -211,16 +228,11 @@ func healToolArguments(args string) string {
 	if json.Valid([]byte(s)) {
 		return s
 	}
-	start := strings.IndexAny(s, "{[")
-	if start < 0 {
+	value, _, ok := firstJSONValue(s)
+	if !ok {
 		return "{}"
 	}
-	dec := json.NewDecoder(strings.NewReader(s[start:]))
-	var raw json.RawMessage
-	if err := dec.Decode(&raw); err != nil {
-		return "{}"
-	}
-	return string(raw)
+	return value
 }
 
 // looksConcatenated reports whether args is more than one complete JSON value run
@@ -234,16 +246,10 @@ func looksConcatenated(args string) bool {
 	if s == "" || json.Valid([]byte(s)) {
 		return false
 	}
-	start := strings.IndexAny(s, "{[")
-	if start < 0 {
+	_, rest, ok := firstJSONValue(s)
+	if !ok {
 		return false
 	}
-	body := s[start:]
-	dec := json.NewDecoder(strings.NewReader(body))
-	var raw json.RawMessage
-	if err := dec.Decode(&raw); err != nil {
-		return false
-	}
-	rest := strings.TrimSpace(body[dec.InputOffset():])
+	rest = strings.TrimSpace(rest)
 	return rest != "" && json.Valid([]byte(rest))
 }

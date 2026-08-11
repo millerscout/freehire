@@ -31,10 +31,6 @@ type fakeBank struct {
 	projects  []resumeextract.Project
 }
 
-func (f *fakeBank) WorkHistory(context.Context, int64) ([]resumeextract.Experience, error) {
-	return f.history, nil
-}
-
 func (f *fakeBank) SeedHistory(context.Context, int64) (experience.SeedHistory, error) {
 	return experience.SeedHistory{
 		Experience:            f.history,

@@ -133,13 +133,11 @@ func (h *cvHandlers) reseedBaseIfStaleVsUpload(c *fiber.Ctx, userID int64) error
 	// summary/education the candidate already has on the base. Same for a seed that
 	// is technically current/usable but carries identity alone: not enough reason to
 	// wipe an existing base's body.
-	if h.resume != nil {
-		if _, current, cerr := h.resume.Structured(c.Context(), userID); cerr != nil {
-			return cerr
-		} else if !current {
-			_, err := h.healRecordHeader(c.Context(), userID, base)
-			return err
-		}
+	if _, current, cerr := h.resume.Structured(c.Context(), userID); cerr != nil {
+		return cerr
+	} else if !current {
+		_, err := h.healRecordHeader(c.Context(), userID, base)
+		return err
 	}
 	if !hasSeedBody(st) {
 		_, err := h.healRecordHeader(c.Context(), userID, base)

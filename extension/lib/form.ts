@@ -78,8 +78,7 @@ export function collectQuestions(doc: Document): Question[] {
   // a `Consent` legend is already its own question, and carrying the legend
   // instead of its label would lose what the user is agreeing to.
   for (const group of groups) {
-    const only = group.controls[0];
-    if (only && group.controls.length === 1) group.label = extractLabel(only);
+    if (group.controls.length === 1) group.label = extractLabel(group.controls[0]);
   }
   return questions;
 }
@@ -181,10 +180,7 @@ function formIndex(el: Element, forms: HTMLFormElement[]): number {
 }
 
 function describeQuestion({ label, controls }: Question, index: number, forms: HTMLFormElement[]): FormField {
-  const el = controls[0];
-  if (!el) {
-    throw new Error('question has no controls');
-  }
+  const [el] = controls;
   const tag = el.tagName.toLowerCase() as FieldTag;
   const field: FormField = {
     index,
@@ -453,8 +449,7 @@ export function fillByLabel(doc: Document, fills: LabelFill[]): FillOutcome[] {
   return fills.map(({ label, value }) => {
     const question = questions.find((q) => normalizeLabel(q.label) === normalizeLabel(label));
     if (!question) return { label, status: 'not_found' as const };
-    const only = question.controls[0];
-    if (only && question.controls.length === 1 && isComboWidget(only)) {
+    if (question.controls.length === 1 && isComboWidget(question.controls[0])) {
       return { label, status: 'deferred_combobox' as const };
     }
     return { label, status: answerQuestion(question, value) ? ('filled' as const) : ('no_option' as const) };
@@ -470,8 +465,7 @@ export function fillByLabel(doc: Document, fills: LabelFill[]): FillOutcome[] {
  * chose by hand, and autofill has no business undoing it.
  */
 function answerQuestion({ controls }: Question, value: string): boolean {
-  const only = controls[0];
-  if (controls.length === 1) return only ? fillField(only, value) : false;
+  if (controls.length === 1) return fillField(controls[0], value);
 
   const chosen = chosenOptions(controls, value);
   if (!chosen) return false;

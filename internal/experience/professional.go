@@ -93,16 +93,7 @@ func experienceFromBank(employments []Employment, atoms []Atom) []resumeextract.
 	for _, e := range employments {
 		// A role with no evidence under it is still career history: job titles matter to
 		// the fit chain before their bullets do.
-		out = append(out, resumeextract.Experience{
-			Title:      e.Role,
-			Company:    e.Company,
-			Location:   e.Location,
-			Start:      e.Start,
-			End:        e.End,
-			Summary:    e.Summary,
-			Highlights: highlights[e.ID],
-			Stack:      e.Stack,
-		})
+		out = append(out, experienceRow(e, highlights[e.ID]))
 	}
 
 	// Evidence with no place is still evidence — often the most valuable kind, since it is
@@ -138,16 +129,7 @@ func seedHistoryFromBank(employments []Employment, atoms []Atom) SeedHistory {
 			})
 			continue
 		}
-		out.Experience = append(out.Experience, resumeextract.Experience{
-			Title:      e.Role,
-			Company:    e.Company,
-			Location:   e.Location,
-			Start:      e.Start,
-			End:        e.End,
-			Summary:    e.Summary,
-			Highlights: hs,
-			Stack:      e.Stack,
-		})
+		out.Experience = append(out.Experience, experienceRow(e, hs))
 	}
 	if len(placeless) > 0 {
 		out.Experience = append(out.Experience, resumeextract.Experience{Highlights: placeless})
@@ -157,6 +139,21 @@ func seedHistoryFromBank(employments []Employment, atoms []Atom) SeedHistory {
 	// structure rather than reading "the bank was touched at all" as "the bank owns roles".
 	out.HasJobEmployments = len(out.Experience) > 0
 	return out
+}
+
+// experienceRow renders one dated employment (job or, when flattened for WorkHistory,
+// project) as a résumé work-history entry, its highlights already resolved by the caller.
+func experienceRow(e Employment, highlights []string) resumeextract.Experience {
+	return resumeextract.Experience{
+		Title:      e.Role,
+		Company:    e.Company,
+		Location:   e.Location,
+		Start:      e.Start,
+		End:        e.End,
+		Summary:    e.Summary,
+		Highlights: highlights,
+		Stack:      e.Stack,
+	}
 }
 
 func publishableHighlights(atoms []Atom) (map[uuid.UUID][]string, []string) {

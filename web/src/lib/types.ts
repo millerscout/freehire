@@ -846,8 +846,8 @@ export type {
   Education as ResumeEducation,
 } from './generated/contracts';
 
-/** The résumé status (`GET /me/resume`): storage flags, owned contacts, parse status,
- *  and the structured résumé (current semantic sections when stamped). */
+/** Candidate-owned contact fields, editable independently of the CV parse that seeded
+ *  them (`GET /me/resume`'s `contacts`, and the body of `PUT /me/resume/contacts`). */
 export interface CandidateContacts {
   full_name?: string;
   email?: string;
@@ -856,6 +856,8 @@ export interface CandidateContacts {
   links?: string[];
 }
 
+/** The résumé status (`GET /me/resume`): storage flags, owned contacts, parse status,
+ *  and the structured résumé (current semantic sections when stamped). */
 export interface ResumeMeta {
   enabled: boolean;
   present: boolean;

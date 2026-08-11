@@ -212,8 +212,7 @@
     // context, and a stale derived read here would leave a cold Job Match tab never
     // opening its stream (stages stuck on "pending" forever).
     const hasAnalysis = !!fit?.analysis;
-    const outOfCredits =
-      !hasAnalysis && !!fit?.credits && fit.credits.remaining <= 0;
+    const outOfCredits = !hasAnalysis && !!fit?.credits && fit.credits.remaining <= 0;
     if (
       isAuthenticated() &&
       !hasAnalysis &&

@@ -185,14 +185,12 @@ func TestGetProfile_DegradesToNullCV(t *testing.T) {
 // what the candidate asserted, the other what was derived for them, and the client has to
 // know which it is holding before it pre-fills a control with it.
 func TestProfileRead_CarriesDerivedLocation(t *testing.T) {
-	repo := &fakeProfileRepo{}
 	cv := fakeStructuredResume{
 		ret: resumeextract.Structured{Headline: "Backend engineer"}, ok: true,
 		geo:   resume.Geography{Countries: []string{"pl"}, Regions: []string{"eu"}, Cities: []string{"Kraków"}},
 		geoOK: true,
 	}
 	app, token := profileAppWithResume(t, savedProfile(), cv)
-	_ = repo
 
 	body := profileDerived(t, app, token)
 	if body == nil {
@@ -206,14 +204,12 @@ func TestProfileRead_CarriesDerivedLocation(t *testing.T) {
 // Nothing derived reads as null rather than as an empty block — an empty block would
 // invite the client to render a pre-fill control as though it had something to offer.
 func TestProfileRead_DerivedLocationNullWhenNothingResolved(t *testing.T) {
-	repo := &fakeProfileRepo{}
 	cv := fakeStructuredResume{
 		ret: resumeextract.Structured{Headline: "Backend engineer"}, ok: true,
 		geo:   resume.Geography{Countries: []string{}, Regions: []string{}},
 		geoOK: true,
 	}
 	app, token := profileAppWithResume(t, savedProfile(), cv)
-	_ = repo
 
 	if got := profileDerived(t, app, token); got != nil {
 		t.Errorf("derived_location = %+v, want null when nothing resolved", got)
